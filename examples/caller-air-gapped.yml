@@ -1,0 +1,35 @@
+name: build-air-gapped (KSCP with every external tool disabled)
+
+# Use this caller in an air-gapped / restricted-tooling environment. With every
+# external dependency disabled, the workflow only builds the image and (optionally)
+# pushes it to a private registry — no Sigstore, Aqua, Bridgecrew, Hadolint,
+# Gitleaks, SLSA generator or Octopus calls. Validated against kscp v1.0.0.
+
+on:
+  push:
+    branches: [main, develop]
+
+permissions:
+  id-token: write   # still required for GCP WIF if push=true
+  contents: read
+  actions: read
+
+jobs:
+  kscp:
+    uses: konecta-ix/kscp/.github/workflows/scp.yml@v1
+    with:
+      image_name: kix-app-airgapped
+      ar_registry: internal-registry.example/approved-images
+      environment: dev
+      scan_dockerfile: false
+      enable_checkov: false
+      enable_hadolint: false
+      enable_gitleaks: false
+      enable_trivy: false
+      sign_container: false
+      enable_cosign: false
+      enable_slsa_provenance: false
+      enable_octopus: false
+      enable_compliance_pr: false
+      enable_vuln_attestation: false
+      push: true

@@ -1,0 +1,1211 @@
+name: Konecta Secure Container Pipeline
+
+# Reusable workflow that builds, scans, signs, attests and publishes a
+# container image. See README.md and docs/ for full usage. Every third-party
+# action is pinned to a 40-character commit SHA (FR-4). Every external tool is
+# independently disable-able (FR-18) so this workflow runs in air-gapped builds.
+#
+# Speed model:
+#   - setenv runs first, then checkov / hadolint / gitleaks fan out in parallel
+#   - build-and-scan is a single job: build with buildx --load, push to a
+#     staging tag in AR (when push=true), and run Trivy once with all scanners
+#     (--scanners vuln,secret,misconfig,license). Avoids 60–120s of tar artifact
+#     transfer between separate build and scan jobs.
+#   - sign-container is environment-gated for approval capture; once approved,
+#     approvals / signed_image / record_of_approvals run in parallel.
+#   - publish is a Skopeo retag (no re-push of layers).
+#   - slsa-provenance and octopus run last; octopus is non-blocking.
+
+on:
+  workflow_call:
+    inputs:
+      # --- core identity
+      image_name:                   { required: true,  type: string }
+      ar_registry:                  { required: true,  type: string }
+      environment:                  { required: true,  type: string }
+      # --- build inputs
+      dockerfile_path:              { required: false, type: string,  default: ./Dockerfile }
+      build_context:                { required: false, type: string,  default: . }
+      built_image:                  { required: false, type: string,  default: '' }
+      platforms:                    { required: false, type: string,  default: linux/amd64 }
+      docker_no_cache:              { required: false, type: boolean, default: false }
+      build_args:                   { required: false, type: string,  default: '' }
+      # --- tag derivation
+      version_file:                 { required: false, type: string,  default: version.txt }
+      version_tag:                  { required: false, type: string,  default: '' }
+      auto_tag:                     { required: false, type: boolean, default: false }
+      # --- dockerfile / source scanning
+      scan_dockerfile:              { required: false, type: boolean, default: true }
+      enable_checkov:               { required: false, type: boolean, default: true }
+      enable_hadolint:              { required: false, type: boolean, default: true }
+      allow_dockerfile_scan_bypass: { required: false, type: boolean, default: false }
+      enable_gitleaks:              { required: false, type: boolean, default: true }
+      gitleaks_config:              { required: false, type: string,  default: '' }
+      gitleaks_scan_mode:           { required: false, type: string,  default: full }
+      allow_secrets_bypass:         { required: false, type: boolean, default: false }
+      # --- image scanning (trivy)
+      enable_trivy:                 { required: false, type: boolean, default: true }
+      enable_trivy_vuln:            { required: false, type: boolean, default: true }
+      enable_trivy_secrets:         { required: false, type: boolean, default: true }
+      enable_trivy_misconfig:       { required: false, type: boolean, default: true }
+      enable_trivy_license:         { required: false, type: boolean, default: false }
+      license_fail_on:              { required: false, type: string,  default: '' }
+      trivy_severity:               { required: false, type: string,  default: 'CRITICAL,HIGH' }
+      allow_scan_bypass:            { required: false, type: boolean, default: false }
+      # --- signing / attestation
+      sign_container:               { required: false, type: boolean, default: true }
+      enable_cosign:                { required: false, type: boolean, default: true }
+      enable_vuln_attestation:      { required: false, type: boolean, default: true }
+      signing_environment:          { required: false, type: string,  default: kscp-signed-image }
+      # --- compliance record
+      enable_compliance_pr:         { required: false, type: boolean, default: false }
+      compliance_repo:              { required: false, type: string,  default: '' }
+      # --- publish + provenance + integrations
+      push:                         { required: false, type: boolean, default: true }
+      dry_run:                      { required: false, type: boolean, default: false }
+      enable_slsa_provenance:       { required: false, type: boolean, default: true }
+      enable_octopus:               { required: false, type: boolean, default: false }
+      octopus_space:                { required: false, type: string,  default: Default }
+    secrets:
+      OCTOPUS_API_KEY:               { required: false }
+      WORKLOAD_REPO_APP_ID:          { required: false }
+      WORKLOAD_REPO_APP_PRIVATE_KEY: { required: false }
+    outputs:
+      image_uri:                       { description: 'Final image URI (primary tag).',  value: '${{ jobs.setenv.outputs.image_uri }}' }
+      image_tag:                       { description: 'Primary tag.',                    value: '${{ jobs.setenv.outputs.image_tag }}' }
+      image_repo:                      { description: 'Image repo path.',                value: '${{ jobs.setenv.outputs.image_repo }}' }
+      signed_digest:                   { description: 'Digest signed by cosign.',        value: '${{ jobs.sign-container.outputs.signed_digest }}' }
+      scan_passed:                     { description: 'Trivy scan passed.',              value: '${{ jobs.build-and-scan.outputs.scan_passed }}' }
+      trivy_critical_count:            { description: 'CRITICAL vulnerability count.',   value: '${{ jobs.build-and-scan.outputs.trivy_critical_count }}' }
+      trivy_high_count:                { description: 'HIGH vulnerability count.',       value: '${{ jobs.build-and-scan.outputs.trivy_high_count }}' }
+      trivy_medium_count:              { description: 'MEDIUM vulnerability count.',     value: '${{ jobs.build-and-scan.outputs.trivy_medium_count }}' }
+      trivy_secret_count:              { description: 'In-image secret count.',          value: '${{ jobs.build-and-scan.outputs.trivy_secret_count }}' }
+      trivy_misconfig_count:           { description: 'In-image misconfig count.',       value: '${{ jobs.build-and-scan.outputs.trivy_misconfig_count }}' }
+      trivy_license_restricted_count:  { description: 'Restricted licence findings.',    value: '${{ jobs.build-and-scan.outputs.trivy_license_restricted_count }}' }
+      gitleaks_findings_count:         { description: 'Gitleaks finding count.',         value: '${{ jobs.secrets-scan.outputs.gitleaks_findings_count }}' }
+      vuln_attestation_digest:         { description: 'Digest of vuln attestation.',     value: '${{ jobs.sign-container.outputs.vuln_attestation_digest }}' }
+      sbom_artifact_name:              { description: 'SBOM artifact filename.',         value: '${{ jobs.build-and-scan.outputs.sbom_artifact_name }}' }
+      approvals_artifact_name:         { description: 'Approvals artifact filename.',    value: '${{ jobs.record-of-approvals.outputs.approvals_artifact_name }}' }
+      slsa_provenance_digest:          { description: 'SLSA provenance digest.',         value: '${{ jobs.slsa-provenance.outputs.attestation_digest }}' }
+      version_created:                 { description: 'Primary tag (alias of image_tag).', value: '${{ jobs.setenv.outputs.image_tag }}' }
+
+permissions:
+  id-token: write          # cosign keyless + WIF + SLSA generator
+  contents: read
+  packages: write          # SLSA generator
+  actions: read            # GET /actions/runs/{run_id}/approvals
+  security-events: write   # SARIF upload
+  deployments: read        # environment approver lookup
+
+concurrency:
+  # Serialise pushes for the same image on the same ref so two builds don't race on tags.
+  group: kscp-${{ inputs.image_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# ---------------------------------------------------------------------------
+# Jobs
+# ---------------------------------------------------------------------------
+jobs:
+
+  # =========================================================================
+  # setenv — compute image metadata
+  # =========================================================================
+  setenv:
+    name: setenv
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      image_repo:      ${{ steps.derive.outputs.image_repo }}
+      image_tag:       ${{ steps.derive.outputs.image_tag }}
+      image_uri:       ${{ steps.derive.outputs.image_uri }}
+      short_sha:       ${{ steps.derive.outputs.short_sha }}
+      tags:            ${{ steps.derive.outputs.tags }}
+      lane:            ${{ steps.derive.outputs.lane }}
+      base_version:    ${{ steps.derive.outputs.base_version }}
+      build_timestamp: ${{ steps.derive.outputs.build_timestamp }}
+      staging_uri:     ${{ steps.derive.outputs.staging_uri }}
+      effective_push:        ${{ steps.derive-effective.outputs.effective_push }}
+      effective_sign:        ${{ steps.derive-effective.outputs.effective_sign }}
+      should_build:          ${{ steps.derive-effective.outputs.should_build }}
+      should_scan_dockerfile: ${{ steps.derive-effective.outputs.should_scan_dockerfile }}
+      should_scan_secrets:   ${{ steps.derive-effective.outputs.should_scan_secrets }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Derive image metadata
+        id: derive
+        env:
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_REF_TYPE: ${{ github.ref_type }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_SHA: ${{ github.sha }}
+          IMAGE_NAME: ${{ inputs.image_name }}
+          AR_REGISTRY: ${{ inputs.ar_registry }}
+          VERSION_FILE: ${{ inputs.version_file }}
+          VERSION_TAG: ${{ inputs.version_tag }}
+          AUTO_TAG: ${{ inputs.auto_tag }}
+          BUILT_IMAGE: ${{ inputs.built_image }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          # Inline copy of scripts/derive-tags.sh — kept here so the reusable
+          # workflow is self-contained (caller repos don't check out kscp).
+          # Local-test reference: scripts/derive-tags.sh.
+          set -euo pipefail
+          short_sha="${GITHUB_SHA:0:7}"
+          build_timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          if [[ -n "${BUILT_IMAGE:-}" ]]; then
+            {
+              echo "image_uri=$BUILT_IMAGE"
+              echo "image_repo=${BUILT_IMAGE%:*}"
+              echo "image_tag=${BUILT_IMAGE##*:}"
+              echo "short_sha=$short_sha"
+              echo "tags=${BUILT_IMAGE##*:}"
+              echo "lane=imported"
+              echo "base_version="
+              echo "build_timestamp=$build_timestamp"
+              echo "staging_uri=$BUILT_IMAGE"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ -f "$VERSION_FILE" ]]; then
+            base_version="$(tr -d '[:space:]' < "$VERSION_FILE")"
+          else
+            base_version="0.0.0"
+          fi
+          if ! [[ "$base_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::$VERSION_FILE='$base_version' is not a valid SemVer x.y.z"
+            exit 1
+          fi
+          image_repo="${AR_REGISTRY}/${IMAGE_NAME}"
+          if [[ -n "${VERSION_TAG:-}" ]]; then
+            primary="$VERSION_TAG"; tags="$primary"; lane="release"
+          elif [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            primary="${GITHUB_REF_NAME#v}"; tags="${primary},release,${short_sha}"; lane="release"
+          elif [[ "$GITHUB_REF_NAME" == "main" ]]; then
+            if [[ "${AUTO_TAG:-false}" == "true" ]]; then
+              IFS='.' read -r maj min pat <<<"$base_version"
+              new_patch=$((pat + 1))
+              primary="${maj}.${min}.${new_patch}"
+            else
+              primary="${base_version}"
+            fi
+            tags="${primary},release,latest,${short_sha}"; lane="release"
+          elif [[ "$GITHUB_REF_NAME" == "develop" ]]; then
+            primary="${base_version}-dev.${short_sha}"; tags="${primary},dev,${short_sha}"; lane="dev"
+          elif [[ "$GITHUB_REF_NAME" == release/* ]]; then
+            rc_name="${GITHUB_REF_NAME#release/}"
+            primary="${base_version}-rc.${rc_name}.${short_sha}"
+            tags="${primary},rc-${rc_name},${short_sha}"; lane="rc"
+          else
+            safe_branch="$(printf '%s' "$GITHUB_REF_NAME" | tr '/' '-' | tr -c 'a-zA-Z0-9._-' '-')"
+            primary="${base_version}-branch.${safe_branch}.${short_sha}"
+            tags="${primary},branch-${safe_branch},${short_sha}"; lane="branch"
+          fi
+          staging_uri="${image_repo}:_kscp-staging-${RUN_ID}-${short_sha}"
+          {
+            echo "image_repo=$image_repo"
+            echo "image_tag=$primary"
+            echo "image_uri=${image_repo}:${primary}"
+            echo "short_sha=$short_sha"
+            echo "tags=$tags"
+            echo "lane=$lane"
+            echo "base_version=$base_version"
+            echo "build_timestamp=$build_timestamp"
+            echo "staging_uri=$staging_uri"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Derive effective toggles (dry_run overrides)
+        id: derive-effective
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          PUSH: ${{ inputs.push }}
+          SIGN: ${{ inputs.sign_container }}
+          SCAN_DOCKERFILE: ${{ inputs.scan_dockerfile }}
+          ENABLE_GITLEAKS: ${{ inputs.enable_gitleaks }}
+          BUILT_IMAGE: ${{ inputs.built_image }}
+        run: |
+          # dry_run forces push=false and sign_container=false (FR-19).
+          if [[ "$DRY_RUN" == "true" ]]; then
+            echo "::notice::dry_run=true → forcing push=false and sign_container=false"
+            effective_push=false
+            effective_sign=false
+          else
+            effective_push="$PUSH"
+            effective_sign="$SIGN"
+          fi
+          if [[ -n "$BUILT_IMAGE" ]]; then
+            should_build=false
+            should_scan_dockerfile=false   # no Dockerfile in imported flow
+            should_scan_secrets=false      # no source tree to scan
+          else
+            should_build=true
+            should_scan_dockerfile="$SCAN_DOCKERFILE"
+            should_scan_secrets="$ENABLE_GITLEAKS"
+          fi
+          {
+            echo "effective_push=$effective_push"
+            echo "effective_sign=$effective_sign"
+            echo "should_build=$should_build"
+            echo "should_scan_dockerfile=$should_scan_dockerfile"
+            echo "should_scan_secrets=$should_scan_secrets"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Summary
+        run: |
+          {
+            echo "## KSCP setenv"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Image | \`${{ steps.derive.outputs.image_repo }}\` |"
+            echo "| Primary tag | \`${{ steps.derive.outputs.image_tag }}\` |"
+            echo "| Lane | ${{ steps.derive.outputs.lane }} |"
+            echo "| Built image | ${{ inputs.built_image || '(none — will build)' }} |"
+            echo "| Effective push | ${{ steps.derive-effective.outputs.effective_push }} |"
+            echo "| Effective sign | ${{ steps.derive-effective.outputs.effective_sign }} |"
+            echo "| dry_run | ${{ inputs.dry_run }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # =========================================================================
+  # checkov — Dockerfile + IaC misconfig (OSS only; no Prisma Cloud)
+  # =========================================================================
+  checkov:
+    name: checkov
+    needs: setenv
+    if: ${{ inputs.scan_dockerfile && inputs.enable_checkov && inputs.built_image == '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Run Checkov (OSS, Dockerfile framework)
+        id: checkov
+        uses: bridgecrewio/checkov-action@38a95e98d734de90b74687a0fc94cfb4dcc9c169 # v12
+        continue-on-error: true
+        with:
+          file: ${{ inputs.dockerfile_path }}
+          framework: dockerfile
+          output_format: cli,sarif
+          output_file_path: console,checkov.sarif
+
+      - name: Upload Checkov SARIF to code scanning
+        if: hashFiles('checkov.sarif') != ''
+        uses: github/codeql-action/upload-sarif@38697555549f1db7851b81482ff19f1fa5c4fedc # v4
+        continue-on-error: true
+        with:
+          sarif_file: checkov.sarif
+          category: checkov-${{ inputs.image_name }}
+
+      - name: Enforce result
+        env:
+          OUTCOME: ${{ steps.checkov.outcome }}
+          BYPASS: ${{ inputs.allow_dockerfile_scan_bypass }}
+        run: |
+          if [[ "$OUTCOME" == "success" ]]; then
+            echo "::notice::Checkov: clean"
+            exit 0
+          fi
+          if [[ "$BYPASS" == "true" ]]; then
+            echo "::warning::Checkov findings present but allow_dockerfile_scan_bypass=true"
+            exit 0
+          fi
+          echo "::error::Checkov findings detected; set allow_dockerfile_scan_bypass=true to override"
+          exit 1
+
+  # =========================================================================
+  # hadolint — Dockerfile linter (confirmed choice per PRD decision 6)
+  # =========================================================================
+  hadolint:
+    name: hadolint
+    needs: setenv
+    if: ${{ inputs.scan_dockerfile && inputs.enable_hadolint && inputs.built_image == '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Run Hadolint
+        id: hadolint
+        uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
+        continue-on-error: true
+        with:
+          dockerfile: ${{ inputs.dockerfile_path }}
+          format: sarif
+          output-file: hadolint.sarif
+          no-fail: true
+
+      - name: Upload Hadolint SARIF to code scanning
+        if: hashFiles('hadolint.sarif') != ''
+        uses: github/codeql-action/upload-sarif@38697555549f1db7851b81482ff19f1fa5c4fedc # v4
+        continue-on-error: true
+        with:
+          sarif_file: hadolint.sarif
+          category: hadolint-${{ inputs.image_name }}
+
+      - name: Enforce result
+        env:
+          BYPASS: ${{ inputs.allow_dockerfile_scan_bypass }}
+        run: |
+          # Hadolint exit code via the action is suppressed (no-fail: true). Parse SARIF.
+          if [[ ! -f hadolint.sarif ]]; then
+            echo "::warning::No SARIF produced — skipping enforcement"
+            exit 0
+          fi
+          err_count=$(jq '[.runs[].results[] | select(.level=="error")] | length' hadolint.sarif)
+          if [[ "$err_count" -eq 0 ]]; then
+            echo "::notice::Hadolint: no error-level findings"
+            exit 0
+          fi
+          if [[ "$BYPASS" == "true" ]]; then
+            echo "::warning::Hadolint error-level findings present but allow_dockerfile_scan_bypass=true"
+            exit 0
+          fi
+          echo "::error::Hadolint reported $err_count error-level finding(s); set allow_dockerfile_scan_bypass=true to override"
+          exit 1
+
+  # =========================================================================
+  # secrets-scan — Gitleaks on the source checkout (US-017)
+  # =========================================================================
+  secrets-scan:
+    name: secrets-scan
+    needs: setenv
+    if: ${{ inputs.enable_gitleaks && inputs.built_image == '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      gitleaks_findings_count: ${{ steps.count.outputs.gitleaks_findings_count }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          # Full history for default 'full' scan mode; HEAD-only is depth: 1.
+          fetch-depth: ${{ inputs.gitleaks_scan_mode == 'head' && 1 || 0 }}
+
+      - name: Run Gitleaks
+        id: gitleaks
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'true'
+          GITLEAKS_ENABLE_COMMENTS: 'false'
+          GITLEAKS_CONFIG: ${{ inputs.gitleaks_config }}
+
+      - name: Upload Gitleaks SARIF to code scanning
+        if: hashFiles('results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@38697555549f1db7851b81482ff19f1fa5c4fedc # v4
+        continue-on-error: true
+        with:
+          sarif_file: results.sarif
+          category: gitleaks-${{ inputs.image_name }}
+
+      - name: Count + enforce
+        id: count
+        env:
+          OUTCOME: ${{ steps.gitleaks.outcome }}
+          BYPASS: ${{ inputs.allow_secrets_bypass }}
+        run: |
+          count=0
+          if [[ -f results.sarif ]]; then
+            count=$(jq '[.runs[].results[]] | length' results.sarif 2>/dev/null || echo 0)
+          fi
+          echo "gitleaks_findings_count=$count" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Gitleaks"
+            echo ""
+            echo "Findings: **$count**"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$count" -eq 0 ]]; then
+            echo "::notice::Gitleaks: clean"
+            exit 0
+          fi
+          if [[ "$BYPASS" == "true" ]]; then
+            echo "::warning::Gitleaks found $count secret(s) but allow_secrets_bypass=true"
+            exit 0
+          fi
+          echo "::error::Gitleaks found $count secret(s); set allow_secrets_bypass=true to override"
+          exit 1
+
+  # =========================================================================
+  # build-and-scan — combined build + Trivy multi-scanner (speed-optimised)
+  # =========================================================================
+  build-and-scan:
+    name: build-and-scan
+    needs: [setenv, checkov, hadolint, secrets-scan]
+    # Run even if pre-build scans are skipped or bypassed (always() + result check).
+    if: |
+      always() &&
+      (needs.checkov.result      == 'success' || needs.checkov.result      == 'skipped' || inputs.allow_dockerfile_scan_bypass) &&
+      (needs.hadolint.result     == 'success' || needs.hadolint.result     == 'skipped' || inputs.allow_dockerfile_scan_bypass) &&
+      (needs.secrets-scan.result == 'success' || needs.secrets-scan.result == 'skipped' || inputs.allow_secrets_bypass)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      image_digest:                  ${{ steps.build.outputs.digest }}
+      staging_uri:                   ${{ needs.setenv.outputs.staging_uri }}
+      scan_passed:                   ${{ steps.trivy-summary.outputs.scan_passed }}
+      trivy_critical_count:          ${{ steps.trivy-summary.outputs.trivy_critical_count }}
+      trivy_high_count:              ${{ steps.trivy-summary.outputs.trivy_high_count }}
+      trivy_medium_count:            ${{ steps.trivy-summary.outputs.trivy_medium_count }}
+      trivy_secret_count:            ${{ steps.trivy-summary.outputs.trivy_secret_count }}
+      trivy_misconfig_count:         ${{ steps.trivy-summary.outputs.trivy_misconfig_count }}
+      trivy_license_restricted_count: ${{ steps.trivy-summary.outputs.trivy_license_restricted_count }}
+      sbom_artifact_name:            ${{ steps.sbom.outputs.sbom_artifact_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        if: ${{ inputs.built_image == '' }}
+
+      # --- GCP auth (only when push=true or built_image set: we need to read/write AR)
+      - name: Configure GCP Auth
+        id: gcp-auth-config
+        if: ${{ needs.setenv.outputs.effective_push == 'true' || inputs.built_image != '' }}
+        env:
+          PROJECT_NUMBER: ${{ vars.GCP_PROJECT_NUMBER }}
+          SERVICE_NAME: ${{ vars.SERVICE_NAME }}
+          ENV: ${{ inputs.environment }}
+          GKE_PROJECT_OVERRIDE: ${{ vars.GCP_GKE_PROJECT_ID }}
+        run: |
+          if [[ -z "$PROJECT_NUMBER" || -z "$SERVICE_NAME" ]]; then
+            echo "::error::Missing required environment variables."
+            echo "::error::Set GCP_PROJECT_NUMBER and SERVICE_NAME as GitHub Environment variables for '${ENV}'."
+            exit 1
+          fi
+          pool_id="github-${SERVICE_NAME}-${ENV}"
+          provider="projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${pool_id}/providers/github-provider"
+          gke_project="${GKE_PROJECT_OVERRIDE:-kd-ix-eur-${ENV}-gke}"
+          sa="${pool_id}@${gke_project}.iam.gserviceaccount.com"
+          {
+            echo "provider_id=${provider}"
+            echo "service_account=${sa}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate to GCP
+        if: ${{ needs.setenv.outputs.effective_push == 'true' || inputs.built_image != '' }}
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ steps.gcp-auth-config.outputs.provider_id }}
+          service_account: ${{ steps.gcp-auth-config.outputs.service_account }}
+
+      - name: Setup gcloud
+        if: ${{ needs.setenv.outputs.effective_push == 'true' || inputs.built_image != '' }}
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Configure Docker for AR
+        if: ${{ needs.setenv.outputs.effective_push == 'true' || inputs.built_image != '' }}
+        run: |
+          host="${AR_REGISTRY%%/*}"
+          gcloud auth configure-docker "$host" --quiet
+        env:
+          AR_REGISTRY: ${{ inputs.ar_registry }}
+
+      # --- Build (only when built_image is empty)
+      - name: Setup QEMU (multi-arch only)
+        if: ${{ needs.setenv.outputs.should_build == 'true' && contains(inputs.platforms, ',') }}
+        uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf # v3.2.0
+
+      - name: Setup Buildx
+        if: ${{ needs.setenv.outputs.should_build == 'true' }}
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Compute build args (__SHORT_SHA__ substitution)
+        id: build-args
+        if: ${{ needs.setenv.outputs.should_build == 'true' }}
+        env:
+          RAW_ARGS: ${{ inputs.build_args }}
+          SHORT_SHA: ${{ needs.setenv.outputs.short_sha }}
+        run: |
+          # Legacy semantic: replace literal __SHORT_SHA__ in build_args.
+          rendered=$(printf '%s' "$RAW_ARGS" | sed "s/__SHORT_SHA__/${SHORT_SHA}/g")
+          {
+            echo 'rendered<<KSCP_EOF'
+            printf '%s\n' "$rendered"
+            echo 'KSCP_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build image
+        id: build
+        if: ${{ needs.setenv.outputs.should_build == 'true' }}
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: ${{ inputs.build_context }}
+          file: ${{ inputs.dockerfile_path }}
+          platforms: ${{ inputs.platforms }}
+          # Single-arch (linux/amd64) → load into daemon for local scan.
+          # Multi-arch → can't --load; push directly to staging.
+          load: ${{ !contains(inputs.platforms, ',') && needs.setenv.outputs.effective_push != 'true' }}
+          push: ${{ needs.setenv.outputs.effective_push == 'true' }}
+          no-cache: ${{ inputs.docker_no_cache }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false   # disable buildx provenance — SLSA generator owns this
+          sbom: false         # disable buildx SBOM — Trivy owns this
+          tags: ${{ needs.setenv.outputs.effective_push == 'true' && needs.setenv.outputs.staging_uri || needs.setenv.outputs.image_uri }}
+          build-args: ${{ steps.build-args.outputs.rendered }}
+          labels: |
+            org.opencontainers.image.title=${{ inputs.image_name }}
+            org.opencontainers.image.version=${{ needs.setenv.outputs.image_tag }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.created=${{ needs.setenv.outputs.build_timestamp }}
+            org.opencontainers.image.licenses=Proprietary
+            konecta.ix.build.kscp-version=${{ vars.KSCP_VERSION || '1.0.0' }}
+            konecta.ix.build.lane=${{ needs.setenv.outputs.lane }}
+
+      # --- Trivy DB cache
+      - name: Cache Trivy DB
+        if: ${{ inputs.enable_trivy }}
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4
+        with:
+          path: ~/.cache/trivy
+          key: trivy-db-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            trivy-db-${{ runner.os }}-
+
+      # --- Build the scanner list from sub-toggles
+      - name: Compose Trivy scanner list
+        id: trivy-scanners
+        if: ${{ inputs.enable_trivy }}
+        env:
+          VULN: ${{ inputs.enable_trivy_vuln }}
+          SECRET: ${{ inputs.enable_trivy_secrets }}
+          MISCONFIG: ${{ inputs.enable_trivy_misconfig }}
+          LICENSE: ${{ inputs.enable_trivy_license }}
+        run: |
+          scanners=()
+          [[ "$VULN" == "true" ]]      && scanners+=("vuln")
+          [[ "$SECRET" == "true" ]]    && scanners+=("secret")
+          [[ "$MISCONFIG" == "true" ]] && scanners+=("misconfig")
+          [[ "$LICENSE" == "true" ]]   && scanners+=("license")
+          if [[ ${#scanners[@]} -eq 0 ]]; then
+            echo "::warning::enable_trivy=true but all sub-scanners are disabled — skipping"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          IFS=','; joined="${scanners[*]}"
+          echo "list=${joined}" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      # --- Scan: pick local-daemon vs registry source
+      - name: Resolve image ref for scan
+        id: scan-ref
+        if: ${{ inputs.enable_trivy && steps.trivy-scanners.outputs.skip != 'true' }}
+        env:
+          BUILT_IMAGE: ${{ inputs.built_image }}
+          STAGING: ${{ needs.setenv.outputs.staging_uri }}
+          LOCAL: ${{ needs.setenv.outputs.image_uri }}
+          EFFECTIVE_PUSH: ${{ needs.setenv.outputs.effective_push }}
+        run: |
+          if [[ -n "$BUILT_IMAGE" ]]; then
+            ref="$BUILT_IMAGE"
+          elif [[ "$EFFECTIVE_PUSH" == "true" ]]; then
+            ref="$STAGING"
+          else
+            ref="$LOCAL"
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - name: Trivy scan (vuln/secret/misconfig/license in one invocation)
+        if: ${{ inputs.enable_trivy && steps.trivy-scanners.outputs.skip != 'true' }}
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
+        with:
+          image-ref: ${{ steps.scan-ref.outputs.ref }}
+          scanners: ${{ steps.trivy-scanners.outputs.list }}
+          severity: ${{ inputs.trivy_severity }}
+          format: json
+          output: trivy-results.json
+          exit-code: '0'
+          ignore-unfixed: true
+
+      - name: Trivy SARIF (for code scanning)
+        if: ${{ inputs.enable_trivy && steps.trivy-scanners.outputs.skip != 'true' }}
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
+        with:
+          image-ref: ${{ steps.scan-ref.outputs.ref }}
+          scanners: ${{ steps.trivy-scanners.outputs.list }}
+          severity: ${{ inputs.trivy_severity }}
+          format: sarif
+          output: trivy-results.sarif
+          exit-code: '0'
+          skip-db-update: true
+
+      - name: Upload Trivy SARIF
+        if: ${{ inputs.enable_trivy && hashFiles('trivy-results.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@38697555549f1db7851b81482ff19f1fa5c4fedc # v4
+        continue-on-error: true
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-${{ inputs.image_name }}
+
+      - name: Generate SBOM (CycloneDX)
+        id: sbom
+        if: ${{ inputs.enable_trivy }}
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
+        with:
+          image-ref: ${{ steps.scan-ref.outputs.ref }}
+          format: cyclonedx
+          output: sbom-${{ inputs.image_name }}-${{ needs.setenv.outputs.short_sha }}.cdx.json
+          skip-db-update: true
+
+      - name: Record SBOM artifact name
+        if: ${{ inputs.enable_trivy }}
+        id: sbom-name
+        run: |
+          name="sbom-${{ inputs.image_name }}-${{ needs.setenv.outputs.short_sha }}.cdx.json"
+          echo "sbom_artifact_name=${name}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload SBOM artifact
+        if: ${{ inputs.enable_trivy && hashFiles(format('sbom-{0}-{1}.cdx.json', inputs.image_name, needs.setenv.outputs.short_sha)) != '' }}
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: sbom-${{ inputs.image_name }}-${{ needs.setenv.outputs.short_sha }}
+          path: sbom-${{ inputs.image_name }}-${{ needs.setenv.outputs.short_sha }}.cdx.json
+          retention-days: 30
+
+      - name: Upload Trivy JSON (for vuln attestation downstream)
+        if: ${{ inputs.enable_trivy && hashFiles('trivy-results.json') != '' }}
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: trivy-${{ inputs.image_name }}-${{ needs.setenv.outputs.short_sha }}
+          path: trivy-results.json
+          retention-days: 7
+
+      - name: Render Trivy summary + counts
+        id: trivy-summary
+        if: ${{ inputs.enable_trivy && steps.trivy-scanners.outputs.skip != 'true' }}
+        env:
+          TRIVY_JSON: trivy-results.json
+          SEVERITY_FAIL: ${{ inputs.trivy_severity }}
+          IMAGE_URI: ${{ steps.scan-ref.outputs.ref }}
+        run: |
+          # Inline copy of scripts/render-trivy-summary.sh — kept here so the
+          # reusable workflow is self-contained.
+          set -euo pipefail
+          count() { jq -r "$1" "$TRIVY_JSON" 2>/dev/null || echo 0; }
+          crit=$(count '[.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length')
+          high=$(count '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH")] | length')
+          med=$(count '[.Results[]?.Vulnerabilities[]? | select(.Severity=="MEDIUM")] | length')
+          low=$(count '[.Results[]?.Vulnerabilities[]? | select(.Severity=="LOW")] | length')
+          secrets=$(count '[.Results[]?.Secrets[]?] | length')
+          misconfig=$(count '[.Results[]?.Misconfigurations[]?] | length')
+          license_restricted=$(count '[.Results[]?.Licenses[]? | select(.Severity=="HIGH" or .Severity=="CRITICAL")] | length')
+          scan_passed=true
+          IFS=',' read -ra fail_levels <<<"$SEVERITY_FAIL"
+          for lvl in "${fail_levels[@]}"; do
+            case "$lvl" in
+              CRITICAL) [[ "$crit" -gt 0 ]] && scan_passed=false ;;
+              HIGH)     [[ "$high" -gt 0 ]] && scan_passed=false ;;
+              MEDIUM)   [[ "$med"  -gt 0 ]] && scan_passed=false ;;
+              LOW)      [[ "$low"  -gt 0 ]] && scan_passed=false ;;
+            esac
+          done
+          [[ "$secrets" -gt 0 ]] && scan_passed=false
+          {
+            echo "trivy_critical_count=$crit"
+            echo "trivy_high_count=$high"
+            echo "trivy_medium_count=$med"
+            echo "trivy_low_count=$low"
+            echo "trivy_secret_count=$secrets"
+            echo "trivy_misconfig_count=$misconfig"
+            echo "trivy_license_restricted_count=$license_restricted"
+            echo "scan_passed=$scan_passed"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo ""
+            echo "## Trivy scan — \`$IMAGE_URI\`"
+            echo ""
+            echo "| Category | Count |"
+            echo "|----------|-------|"
+            echo "| CRITICAL vulnerabilities | $crit |"
+            echo "| HIGH vulnerabilities | $high |"
+            echo "| MEDIUM vulnerabilities | $med |"
+            echo "| LOW vulnerabilities | $low |"
+            echo "| Secrets in image | $secrets |"
+            echo "| Misconfigurations | $misconfig |"
+            echo "| Restricted licences | $license_restricted |"
+            echo ""
+            echo "**Scan passed:** \`$scan_passed\` (fail-on: \`$SEVERITY_FAIL\`)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enforce scan result
+        if: ${{ inputs.enable_trivy && steps.trivy-scanners.outputs.skip != 'true' }}
+        env:
+          PASSED: ${{ steps.trivy-summary.outputs.scan_passed }}
+          BYPASS: ${{ inputs.allow_scan_bypass }}
+        run: |
+          if [[ "$PASSED" == "true" ]]; then
+            exit 0
+          fi
+          if [[ "$BYPASS" == "true" ]]; then
+            echo "::warning::Trivy scan failed but allow_scan_bypass=true"
+            exit 0
+          fi
+          echo "::error::Trivy scan failed; set allow_scan_bypass=true to override"
+          exit 1
+
+  # =========================================================================
+  # sign-container — Cosign keyless + SBOM attest + vuln attest (env-gated)
+  # =========================================================================
+  sign-container:
+    name: sign-container
+    needs: [setenv, build-and-scan]
+    if: ${{ needs.setenv.outputs.effective_sign == 'true' && needs.setenv.outputs.effective_push == 'true' && inputs.enable_cosign }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.signing_environment }}
+    timeout-minutes: 15
+    outputs:
+      signed_digest: ${{ steps.sign.outputs.signed_digest }}
+      vuln_attestation_digest: ${{ steps.attest-vuln.outputs.vuln_attestation_digest }}
+    steps:
+      - name: Configure GCP Auth
+        id: gcp-auth-config
+        env:
+          PROJECT_NUMBER: ${{ vars.GCP_PROJECT_NUMBER }}
+          SERVICE_NAME: ${{ vars.SERVICE_NAME }}
+          ENV: ${{ inputs.environment }}
+          GKE_PROJECT_OVERRIDE: ${{ vars.GCP_GKE_PROJECT_ID }}
+        run: |
+          pool_id="github-${SERVICE_NAME}-${ENV}"
+          provider="projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${pool_id}/providers/github-provider"
+          gke_project="${GKE_PROJECT_OVERRIDE:-kd-ix-eur-${ENV}-gke}"
+          sa="${pool_id}@${gke_project}.iam.gserviceaccount.com"
+          {
+            echo "provider_id=${provider}"
+            echo "service_account=${sa}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ steps.gcp-auth-config.outputs.provider_id }}
+          service_account: ${{ steps.gcp-auth-config.outputs.service_account }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Configure Docker for AR
+        env:
+          AR_REGISTRY: ${{ inputs.ar_registry }}
+        run: |
+          host="${AR_REGISTRY%%/*}"
+          gcloud auth configure-docker "$host" --quiet
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+
+      - name: Resolve image digest
+        id: digest
+        env:
+          STAGING: ${{ needs.build-and-scan.outputs.staging_uri }}
+          BUILT_IMAGE: ${{ inputs.built_image }}
+        run: |
+          target="${BUILT_IMAGE:-$STAGING}"
+          digest=$(gcloud artifacts docker images describe "$target" --format='value(image_summary.digest)')
+          if [[ -z "$digest" ]]; then
+            echo "::error::Could not resolve digest for $target"
+            exit 1
+          fi
+          repo="${target%%:*}"
+          [[ "$target" =~ @sha256: ]] && repo="${target%%@*}"
+          {
+            echo "repo=$repo"
+            echo "digest=$digest"
+            echo "image_at_digest=${repo}@${digest}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Sign image (cosign keyless)
+        id: sign
+        env:
+          COSIGN_EXPERIMENTAL: '1'
+        run: |
+          cosign sign --yes "${{ steps.digest.outputs.image_at_digest }}"
+          echo "signed_digest=${{ steps.digest.outputs.digest }}" >> "$GITHUB_OUTPUT"
+
+      - name: Download SBOM
+        if: ${{ inputs.enable_trivy }}
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: sbom-${{ inputs.image_name }}-${{ needs.setenv.outputs.short_sha }}
+          path: .
+
+      - name: Attach SBOM attestation
+        if: ${{ inputs.enable_trivy }}
+        env:
+          SBOM: sbom-${{ inputs.image_name }}-${{ needs.setenv.outputs.short_sha }}.cdx.json
+        run: |
+          cosign attest --yes \
+            --type cyclonedx \
+            --predicate "$SBOM" \
+            "${{ steps.digest.outputs.image_at_digest }}"
+
+      - name: Download Trivy JSON (for vuln attestation)
+        if: ${{ inputs.enable_vuln_attestation && inputs.enable_trivy }}
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: trivy-${{ inputs.image_name }}-${{ needs.setenv.outputs.short_sha }}
+          path: .
+
+      - name: Attach vulnerability attestation
+        id: attest-vuln
+        if: ${{ inputs.enable_vuln_attestation && inputs.enable_trivy }}
+        run: |
+          cosign attest --yes \
+            --type vuln \
+            --predicate trivy-results.json \
+            "${{ steps.digest.outputs.image_at_digest }}"
+          echo "vuln_attestation_digest=${{ steps.digest.outputs.digest }}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify image signature
+        run: |
+          cosign verify \
+            --certificate-identity-regexp "https://github.com/${{ github.repository_owner }}/.+/.github/workflows/.+@.+" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "${{ steps.digest.outputs.image_at_digest }}"
+
+      - name: Verify vulnerability attestation
+        if: ${{ inputs.enable_vuln_attestation && inputs.enable_trivy }}
+        run: |
+          cosign verify-attestation \
+            --type vuln \
+            --certificate-identity-regexp "https://github.com/${{ github.repository_owner }}/.+/.github/workflows/.+@.+" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "${{ steps.digest.outputs.image_at_digest }}"
+
+  # =========================================================================
+  # approvals — JSON record of reviewers (post-sign)
+  # =========================================================================
+  approvals:
+    name: approvals
+    needs: [setenv, build-and-scan, sign-container]
+    if: ${{ needs.setenv.outputs.effective_sign == 'true' && needs.setenv.outputs.effective_push == 'true' && inputs.enable_cosign }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      approvals_json_artifact: approvals-${{ inputs.image_name }}-${{ needs.setenv.outputs.short_sha }}
+    steps:
+      - name: Resolve approvers + write record
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          IMAGE_URI: ${{ needs.build-and-scan.outputs.staging_uri }}
+          IMAGE_DIGEST: ${{ needs.sign-container.outputs.signed_digest }}
+          SBOM_ARTIFACT: ${{ needs.build-and-scan.outputs.sbom_artifact_name }}
+          TRIVY_CRITICAL_COUNT: ${{ needs.build-and-scan.outputs.trivy_critical_count }}
+          TRIVY_HIGH_COUNT: ${{ needs.build-and-scan.outputs.trivy_high_count }}
+          OUT_JSON: approvals-${{ inputs.image_name }}-${{ needs.setenv.outputs.short_sha }}.json
+          OUT_MD: approvals-${{ inputs.image_name }}-${{ needs.setenv.outputs.short_sha }}.md
+        run: |
+          # Inline copy of scripts/record-approvals.sh — see local-test reference there.
+          set -euo pipefail
+          approval_timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          workflow_run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          approvals_json="$(
+            curl -fsSL \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/approvals" \
+              || echo '[]'
+          )"
+          approvers_count="$(echo "$approvals_json" | jq 'length')"
+          if [[ "$approvers_count" -eq 0 ]]; then
+            echo "::error::No approvers resolved from /actions/runs/${GITHUB_RUN_ID}/approvals."
+            echo "::error::sign_container=true requires the signing GitHub Environment to have required reviewers."
+            exit 1
+          fi
+          approvers_list="$(echo "$approvals_json" | jq -c '[.[] | {login: .user.login, id: .user.id, approved_at: .updated_at, comment: (.comment // "")}]')"
+          triggered_by_id="$(curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" "${GITHUB_API_URL}/users/${GITHUB_ACTOR}" | jq -r '.id // 0')"
+          jq -n \
+            --arg triggered_by "$GITHUB_ACTOR" \
+            --argjson triggered_by_id "$triggered_by_id" \
+            --argjson approvers "$approvers_list" \
+            --arg approval_timestamp "$approval_timestamp" \
+            --arg commit_sha "$GITHUB_SHA" \
+            --arg image_uri "$IMAGE_URI" \
+            --arg image_digest "$IMAGE_DIGEST" \
+            --arg workflow_run_url "$workflow_run_url" \
+            --arg sbom_artifact "$SBOM_ARTIFACT" \
+            --argjson trivy_critical $((${TRIVY_CRITICAL_COUNT:-0})) \
+            --argjson trivy_high $((${TRIVY_HIGH_COUNT:-0})) \
+            '{triggered_by:$triggered_by, triggered_by_id:$triggered_by_id, approvers:$approvers, approval_timestamp:$approval_timestamp, commit_sha:$commit_sha, image_uri:$image_uri, image_digest:$image_digest, workflow_run_url:$workflow_run_url, sbom_artifact:$sbom_artifact, scan_summary:{critical:$trivy_critical, high:$trivy_high}}' > "$OUT_JSON"
+          {
+            echo "# Signing record — $IMAGE_URI"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Image | \`$IMAGE_URI\` |"
+            echo "| Digest | \`$IMAGE_DIGEST\` |"
+            echo "| Commit | \`$GITHUB_SHA\` |"
+            echo "| Triggered by | @$GITHUB_ACTOR (id $triggered_by_id) |"
+            echo "| Approval timestamp | $approval_timestamp |"
+            echo "| Workflow run | $workflow_run_url |"
+            echo "| SBOM artifact | ${SBOM_ARTIFACT:-(none)} |"
+            echo "| Trivy CRITICAL / HIGH | ${TRIVY_CRITICAL_COUNT:-0} / ${TRIVY_HIGH_COUNT:-0} |"
+            echo ""
+            echo "## Approvers"
+            echo ""
+            echo "| Login | User ID | Approved at | Comment |"
+            echo "|-------|---------|-------------|---------|"
+            echo "$approvals_json" \
+              | jq -r '.[] | "| @\(.user.login) | \(.user.id) | \(.updated_at) | \((.comment // "") | gsub("\\|"; "\\|")) |"'
+          } > "$OUT_MD"
+
+      - name: Upload approvals JSON
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: approvals-${{ inputs.image_name }}-${{ needs.setenv.outputs.short_sha }}
+          path: |
+            approvals-${{ inputs.image_name }}-${{ needs.setenv.outputs.short_sha }}.json
+            approvals-${{ inputs.image_name }}-${{ needs.setenv.outputs.short_sha }}.md
+          retention-days: 365
+
+  # =========================================================================
+  # signed_image — append-only digest log
+  # =========================================================================
+  signed_image:
+    name: signed_image
+    needs: [setenv, sign-container]
+    if: ${{ needs.setenv.outputs.effective_sign == 'true' && needs.setenv.outputs.effective_push == 'true' && inputs.enable_cosign }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Append digest line
+        env:
+          IMAGE_REPO: ${{ needs.setenv.outputs.image_repo }}
+          IMAGE_TAG: ${{ needs.setenv.outputs.image_tag }}
+          DIGEST: ${{ needs.sign-container.outputs.signed_digest }}
+          SHA: ${{ github.sha }}
+        run: |
+          ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          printf '%s@%s\t%s\t%s\t%s\n' "$IMAGE_REPO" "$DIGEST" "$IMAGE_TAG" "$SHA" "$ts" > signed_images.txt
+          cat signed_images.txt
+
+      - name: Upload signed_images.txt
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: signed-images-${{ inputs.image_name }}-${{ needs.setenv.outputs.short_sha }}
+          path: signed_images.txt
+          retention-days: 90
+
+  # =========================================================================
+  # record_of_approvals — Markdown audit artifact + optional compliance PR
+  # =========================================================================
+  record-of-approvals:
+    name: record_of_approvals
+    needs: [setenv, build-and-scan, sign-container, approvals, signed_image]
+    if: ${{ needs.setenv.outputs.effective_sign == 'true' && needs.setenv.outputs.effective_push == 'true' && inputs.enable_cosign }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      approvals_artifact_name: record-of-approvals-${{ inputs.image_name }}-${{ needs.setenv.outputs.short_sha }}
+    steps:
+      - name: Download approvals artifact
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: approvals-${{ inputs.image_name }}-${{ needs.setenv.outputs.short_sha }}
+          path: .
+
+      - name: Promote markdown to record + step summary
+        run: |
+          mv "approvals-${{ inputs.image_name }}-${{ needs.setenv.outputs.short_sha }}.md" \
+             "record-of-approvals-${{ inputs.image_name }}-${{ needs.setenv.outputs.short_sha }}.md"
+          cat "record-of-approvals-${{ inputs.image_name }}-${{ needs.setenv.outputs.short_sha }}.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Markdown record
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: record-of-approvals-${{ inputs.image_name }}-${{ needs.setenv.outputs.short_sha }}
+          path: record-of-approvals-${{ inputs.image_name }}-${{ needs.setenv.outputs.short_sha }}.md
+          retention-days: 365
+
+      # --- Optional compliance PR (reuses the workload-repo GitHub App, FR-21)
+      - name: Generate compliance app token
+        if: ${{ inputs.enable_compliance_pr && inputs.compliance_repo != '' }}
+        id: compliance-app
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        with:
+          app-id: ${{ secrets.WORKLOAD_REPO_APP_ID }}
+          private-key: ${{ secrets.WORKLOAD_REPO_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ inputs.compliance_repo }}
+
+      - name: Open compliance PR
+        if: ${{ inputs.enable_compliance_pr && inputs.compliance_repo != '' }}
+        env:
+          GH_TOKEN: ${{ steps.compliance-app.outputs.token }}
+          IMAGE_NAME: ${{ inputs.image_name }}
+          SHORT_SHA: ${{ needs.setenv.outputs.short_sha }}
+          COMPLIANCE_REPO: ${{ inputs.compliance_repo }}
+        run: |
+          year="$(date -u +%Y)"
+          month="$(date -u +%m)"
+          dest="records/${year}/${month}/${IMAGE_NAME}-${SHORT_SHA}.md"
+          src="record-of-approvals-${IMAGE_NAME}-${SHORT_SHA}.md"
+          tmp="$(mktemp -d)"
+          git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${COMPLIANCE_REPO}.git" "$tmp/repo"
+          mkdir -p "$tmp/repo/$(dirname "$dest")"
+          cp "$src" "$tmp/repo/$dest"
+          (
+            cd "$tmp/repo"
+            git config user.name 'kscp-bot'
+            git config user.email 'kscp-bot@konecta.com'
+            branch="kscp/record/${IMAGE_NAME}-${SHORT_SHA}"
+            git checkout -b "$branch"
+            git add "$dest"
+            git commit -m "record(${IMAGE_NAME}): ${SHORT_SHA}"
+            git push origin "$branch"
+            gh pr create \
+              --repo "$COMPLIANCE_REPO" \
+              --base main \
+              --head "$branch" \
+              --title "record(${IMAGE_NAME}): ${SHORT_SHA}" \
+              --body "Auto-generated KSCP signing record. See \`$dest\`."
+          )
+
+  # =========================================================================
+  # publish — Skopeo retag staging → final tags
+  # =========================================================================
+  publish:
+    name: publish
+    needs: [setenv, build-and-scan, sign-container, record-of-approvals]
+    if: |
+      always() &&
+      needs.setenv.outputs.effective_push == 'true' &&
+      (needs.build-and-scan.result == 'success' || inputs.allow_scan_bypass) &&
+      (needs.setenv.outputs.effective_sign != 'true' || needs.sign-container.result == 'success') &&
+      (needs.setenv.outputs.effective_sign != 'true' || needs.record-of-approvals.result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      published_uri: ${{ steps.publish.outputs.published_uri }}
+    steps:
+      - name: Configure GCP Auth
+        id: gcp-auth-config
+        env:
+          PROJECT_NUMBER: ${{ vars.GCP_PROJECT_NUMBER }}
+          SERVICE_NAME: ${{ vars.SERVICE_NAME }}
+          ENV: ${{ inputs.environment }}
+          GKE_PROJECT_OVERRIDE: ${{ vars.GCP_GKE_PROJECT_ID }}
+        run: |
+          pool_id="github-${SERVICE_NAME}-${ENV}"
+          provider="projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${pool_id}/providers/github-provider"
+          gke_project="${GKE_PROJECT_OVERRIDE:-kd-ix-eur-${ENV}-gke}"
+          sa="${pool_id}@${gke_project}.iam.gserviceaccount.com"
+          {
+            echo "provider_id=${provider}"
+            echo "service_account=${sa}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ steps.gcp-auth-config.outputs.provider_id }}
+          service_account: ${{ steps.gcp-auth-config.outputs.service_account }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Install Skopeo
+        run: |
+          if ! command -v skopeo >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq skopeo
+          fi
+          skopeo --version
+
+      - name: Retag staging → final via Skopeo
+        id: publish
+        env:
+          IMAGE_REPO: ${{ needs.setenv.outputs.image_repo }}
+          STAGING_URI: ${{ needs.build-and-scan.outputs.staging_uri }}
+          TAGS: ${{ needs.setenv.outputs.tags }}
+        run: |
+          set -euo pipefail
+          token=$(gcloud auth print-access-token)
+          dest_user="oauth2accesstoken"
+          IFS=',' read -ra tag_array <<<"$TAGS"
+          for t in "${tag_array[@]}"; do
+            dest="${IMAGE_REPO}:${t}"
+            echo "::group::skopeo copy ${STAGING_URI} → ${dest}"
+            skopeo copy \
+              "--src-creds=${dest_user}:${token}" \
+              "--dest-creds=${dest_user}:${token}" \
+              "docker://${STAGING_URI}" "docker://${dest}"
+            echo "::endgroup::"
+          done
+          echo "published_uri=${IMAGE_REPO}:${tag_array[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Cosign (re-verify after publish)
+        if: ${{ needs.setenv.outputs.effective_sign == 'true' && inputs.enable_cosign }}
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+
+      - name: Re-verify signature on published digest
+        if: ${{ needs.setenv.outputs.effective_sign == 'true' && inputs.enable_cosign }}
+        env:
+          IMAGE_REPO: ${{ needs.setenv.outputs.image_repo }}
+          DIGEST: ${{ needs.sign-container.outputs.signed_digest }}
+        run: |
+          cosign verify \
+            --certificate-identity-regexp "https://github.com/${{ github.repository_owner }}/.+/.github/workflows/.+@.+" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "${IMAGE_REPO}@${DIGEST}"
+
+      - name: Delete staging tag
+        if: always()
+        env:
+          STAGING_URI: ${{ needs.build-and-scan.outputs.staging_uri }}
+        run: |
+          gcloud artifacts docker tags delete "$STAGING_URI" --quiet || true
+
+  # =========================================================================
+  # slsa-provenance — SLSA L3 build provenance via upstream reusable
+  # =========================================================================
+  slsa-provenance:
+    name: slsa-provenance
+    needs: [setenv, build-and-scan, publish]
+    if: |
+      always() &&
+      inputs.enable_slsa_provenance &&
+      needs.setenv.outputs.effective_sign == 'true' &&
+      needs.setenv.outputs.effective_push == 'true' &&
+      needs.publish.result == 'success'
+    permissions:
+      id-token: write
+      contents: read
+      packages: write
+      actions: read
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@v2.0.0  # TODO: pin SHA at release time (pin-audit blocks unpinned uses outside konecta-ix/* + slsa-framework/* exemption)
+    with:
+      image: ${{ needs.publish.outputs.published_uri }}
+      digest: ${{ needs.build-and-scan.outputs.image_digest }}
+      registry-username: oauth2accesstoken
+
+  # =========================================================================
+  # octopus — optional build-info passthrough
+  # =========================================================================
+  octopus:
+    name: octopus
+    needs: [setenv, publish]
+    if: ${{ always() && inputs.enable_octopus && needs.publish.result == 'success' }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 2
+    steps:
+      - name: Login to Octopus
+        if: ${{ vars.OCTOPUS_URL != '' }}
+        uses: OctopusDeploy/login@e485a40e4b47a154bdf59cc79e57894b0769a760 # v1
+        with:
+          server: ${{ vars.OCTOPUS_URL }}
+          api_key: ${{ secrets.OCTOPUS_API_KEY }}
+
+      - name: Push build info
+        if: ${{ vars.OCTOPUS_URL != '' }}
+        uses: OctopusDeploy/push-build-information-action@251acb0783c656ebf30d5bc69474a037116cce09 # v3
+        with:
+          server: ${{ vars.OCTOPUS_URL }}
+          space: ${{ inputs.octopus_space }}
+          packages: ${{ inputs.image_name }}
+          version: ${{ needs.setenv.outputs.image_tag }}

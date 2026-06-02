@@ -1,0 +1,60 @@
+name: python-ci-and-publish (KSCP caller with Python CI)
+
+# Mirrors the structure of docker-build-push-python.yml: runs Python CI (lint,
+# typecheck, tests) first, then hands off to KSCP for container build/scan/sign.
+# Validated against kscp v1.0.0.
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  id-token: write
+  contents: read
+  packages: write
+  actions: read
+  security-events: write
+
+jobs:
+  python-ci:
+    name: python-ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@bd01e18f51369d5a26f1651c3cb451d3417e3bba # v6
+        with:
+          enable-cache: true
+
+      - name: Sync deps
+        run: uv sync --frozen
+
+      - name: Ruff
+        run: uv run ruff check .
+
+      - name: Mypy
+        run: uv run mypy .
+
+      - name: Pytest
+        run: uv run pytest -q
+
+  kscp:
+    needs: python-ci
+    uses: konecta-ix/kscp/.github/workflows/scp.yml@v1
+    with:
+      image_name: kix-app-pythonservice
+      ar_registry: europe-west1-docker.pkg.dev/kd-ix-eur-shr-artifacts/approved-images
+      environment: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
+      dry_run: ${{ github.event_name == 'pull_request' }}
+      build_args: |
+        SHORT_SHA=__SHORT_SHA__
+        APP_VERSION=__SHORT_SHA__
+    secrets:
+      OCTOPUS_API_KEY: ${{ secrets.OCTOPUS_API_KEY }}
+      WORKLOAD_REPO_APP_ID: ${{ secrets.WORKLOAD_REPO_APP_ID }}
+      WORKLOAD_REPO_APP_PRIVATE_KEY: ${{ secrets.WORKLOAD_REPO_APP_PRIVATE_KEY }}

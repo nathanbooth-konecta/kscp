@@ -1,0 +1,3 @@
+*       @konecta-ix/platform-team
+/.github/workflows/scp.yml   @konecta-ix/platform-team @konecta-ix/security-team
+/docs/                       @konecta-ix/platform-team @konecta-ix/security-team

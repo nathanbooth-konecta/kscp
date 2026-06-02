@@ -1,0 +1,357 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1280"
+     font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif"
+     role="img" aria-label="Konecta Secure Container Pipeline execution graph: a caller workflow_call invokes scp.yml, which orchestrates eleven jobs across eight stages. Stage 0 setenv derives tags and resolves the build lane. Stage 1 fans out to three parallel pre-build scans (Gitleaks secrets-scan, Checkov dockerfile misconfig, Hadolint dockerfile lint). Stage 2 build-and-scan builds the image with buildx and runs a single Trivy invocation with vuln, secret, misconfig and license scanners plus a CycloneDX SBOM. Stage 3 sign-container runs in an environment-gated job that captures approver metadata, then Cosign keyless signs the image with SBOM and vulnerability attestations. Stages 4 and 5 expose the signed digest, record approver metadata, and write the tamper-evident record-of-approvals JSON. Stage 6 publish uses Skopeo to atomically retag the staging image to version, lane, latest and sha tags in the Konecta Artifact Registry. Stage 7 fans out to two parallel attestations: SLSA Level 3 build provenance via slsa-github-generator, and a non-blocking Octopus build-info push. Animated dashes and traveling packets indicate build progression.">
+
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0F172A" flood-opacity="0.10"/>
+    </filter>
+    <filter id="shadow-strong" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#0F172A" flood-opacity="0.12"/>
+    </filter>
+
+    <linearGradient id="bg-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#FAFBFC"/>
+      <stop offset="100%" stop-color="#F1F5F9"/>
+    </linearGradient>
+
+    <marker id="arrow" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0,1 L11,6 L0,11 Z" fill="#64748B"/>
+    </marker>
+
+    <style><![CDATA[
+      .title    { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; fill: #0F172A; }
+      .subtitle { font-size: 13px; font-weight: 400; fill: #64748B; }
+      .panel-h  { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; fill: #0F172A; }
+      .panel-s  { font-size: 12px; font-weight: 400; fill: #64748B; }
+      .mod-h    { font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; fill: #0F172A; }
+      .mod-s    { font-size: 11.5px; font-weight: 400; fill: #64748B; }
+      .mod-c    { font-size: 10.5px; font-weight: 600; fill: #64748B; letter-spacing: 0.04em; text-transform: uppercase; }
+      .card-h   { font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; fill: #0F172A; }
+      .card-s   { font-size: 11.5px; font-weight: 400; fill: #64748B; }
+      .stage-l  { font-size: 10.5px; font-weight: 700; fill: #94A3B8; letter-spacing: 0.08em; text-transform: uppercase; }
+      .meta     { font-size: 11px; font-weight: 500; fill: #475569; font-style: italic; }
+      .footer   { font-size: 11px; fill: #94A3B8; }
+
+      .panel   { fill: #FFFFFF; stroke: #E2E8F0; stroke-width: 1; }
+      .nested  { fill: #F8FAFC; stroke: #E2E8F0; stroke-width: 1; }
+      .server  { fill: url(#bg-grad); stroke: #CBD5E1; stroke-width: 1.25; stroke-dasharray: 4 4; }
+
+      .accent-indigo  { fill: #6366F1; }
+      .accent-violet  { fill: #8B5CF6; }
+      .accent-emerald { fill: #10B981; }
+      .accent-amber   { fill: #F59E0B; }
+      .accent-sky     { fill: #0EA5E9; }
+      .accent-rose    { fill: #F43F5E; }
+      .accent-slate   { fill: #64748B; }
+
+      .glyph    { fill: none; stroke: #475569; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+      .glyph-bg { fill: #F1F5F9; stroke: #E2E8F0; stroke-width: 1; }
+
+      .flow {
+        stroke: #94A3B8;
+        stroke-width: 1.75;
+        stroke-dasharray: 5 3;
+        fill: none;
+        marker-end: url(#arrow);
+        animation: flow 1s linear infinite;
+      }
+      @keyframes flow {
+        0%   { stroke-dashoffset: 0;  }
+        100% { stroke-dashoffset: -8; }
+      }
+      .flow-fan {
+        stroke: #CBD5E1;
+        stroke-width: 1.5;
+        stroke-dasharray: 4 3;
+        fill: none;
+        animation: flow 1.2s linear infinite;
+      }
+
+      .packet {
+        fill: #6366F1;
+        filter: drop-shadow(0 0 3px rgba(99, 102, 241, 0.45));
+      }
+
+      .pulse {
+        animation: pulse 3s ease-in-out infinite;
+        transform-origin: center;
+        transform-box: fill-box;
+      }
+      @keyframes pulse {
+        0%, 100% { opacity: 1;    }
+        50%      { opacity: 0.88; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .flow, .flow-fan, .packet, .pulse { animation: none; }
+        .packet { display: none; }
+      }
+
+      .count-pill { fill: #F1F5F9; stroke: #CBD5E1; stroke-width: 1; }
+      .env-pill   { fill: #F3E8FF; stroke: #C4B5FD; stroke-width: 1; }
+      .ga-pill    { fill: #DCFCE7; stroke: #86EFAC; stroke-width: 1; }
+    ]]></style>
+  </defs>
+
+  <rect width="1200" height="1280" fill="#FFFFFF"/>
+
+  <!-- Header -->
+  <text x="40" y="42" class="title">Konecta Secure Container Pipeline</text>
+  <text x="40" y="64" class="subtitle">scp.yml · 11 jobs across 8 execution stages · animated arrows show build progression</text>
+
+  <!-- Legend -->
+  <g transform="translate(965,30)">
+    <rect x="0" y="0" width="195" height="60" rx="6" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1"/>
+    <text x="10" y="16" class="mod-c">job phase</text>
+    <rect x="10" y="22" width="4" height="10" rx="1" class="accent-slate"/>
+    <text x="22" y="31" class="card-s">setup</text>
+    <rect x="62" y="22" width="4" height="10" rx="1" class="accent-emerald"/>
+    <text x="74" y="31" class="card-s">scan</text>
+    <rect x="116" y="22" width="4" height="10" rx="1" class="accent-violet"/>
+    <text x="128" y="31" class="card-s">sign</text>
+    <rect x="156" y="22" width="4" height="10" rx="1" class="accent-sky"/>
+    <text x="168" y="31" class="card-s">publish</text>
+    <rect x="10" y="38" width="4" height="10" rx="1" class="accent-amber"/>
+    <text x="22" y="47" class="card-s">attest</text>
+    <rect x="62" y="38" width="4" height="10" rx="1" class="accent-indigo"/>
+    <text x="74" y="47" class="card-s">caller / external</text>
+  </g>
+
+  <!-- ==================== CALLER ==================== -->
+  <g filter="url(#shadow)">
+    <rect x="380" y="100" width="440" height="80" rx="10" class="panel"/>
+    <rect x="380" y="100" width="5" height="80" rx="2" class="accent-indigo"/>
+    <g transform="translate(403,120)">
+      <rect x="-2" y="-2" width="36" height="36" rx="8" class="glyph-bg"/>
+      <path d="M8,10 L8,26 L24,26 L24,16 L18,10 Z" class="glyph"/>
+      <line x1="18" y1="10" x2="18" y2="16" class="glyph"/>
+      <line x1="18" y1="16" x2="24" y2="16" class="glyph"/>
+    </g>
+    <text x="455" y="132" class="panel-h">Caller · workflow_call</text>
+    <text x="455" y="152" class="panel-s">uses: konecta-ix/kscp/.github/workflows/scp.yml@v1</text>
+    <text x="455" y="170" class="panel-s">image_name · ar_registry · environment · + 36 typed inputs</text>
+  </g>
+
+  <!-- Flow: Caller → setenv -->
+  <line x1="600" y1="180" x2="600" y2="232" class="flow"/>
+  <text x="612" y="210" class="meta">workflow_call</text>
+  <circle r="4" class="packet">
+    <animate attributeName="cx" values="600;600" dur="1.4s" repeatCount="indefinite"/>
+    <animate attributeName="cy" values="180;230" dur="1.4s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.15;0.85;1" dur="1.4s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- ==================== KSCP CONTAINER ==================== -->
+  <g filter="url(#shadow-strong)">
+    <rect x="40" y="236" width="1120" height="930" rx="16" class="server"/>
+  </g>
+  <text x="60" y="264" class="panel-h">scp.yml · reusable workflow</text>
+  <text x="60" y="282" class="panel-s">39 inputs · 17 outputs · 30-min job timeout · concurrency.group cancels stale runs</text>
+  <g>
+    <rect x="1090" y="252" width="44" height="22" rx="11" class="ga-pill"/>
+    <text x="1112" y="267" text-anchor="middle" font-size="11" font-weight="600" fill="#166534">GA</text>
+  </g>
+
+  <!-- ============== STAGE 0: setenv ============== -->
+  <text x="70" y="312" class="stage-l">Stage 0 · orchestration</text>
+  <g filter="url(#shadow)">
+    <rect x="70" y="318" width="1060" height="58" rx="10" class="panel"/>
+    <rect x="70" y="318" width="5" height="58" rx="2" class="accent-slate"/>
+    <g transform="translate(93,332)">
+      <rect x="-2" y="-2" width="30" height="30" rx="7" class="glyph-bg"/>
+      <circle cx="13" cy="13" r="6" class="glyph"/>
+      <line x1="13" y1="9" x2="13" y2="13" class="glyph"/>
+      <line x1="13" y1="13" x2="17" y2="15" class="glyph"/>
+    </g>
+    <text x="135" y="344" class="panel-h">setenv</text>
+    <text x="135" y="362" class="panel-s">derive tags · resolve lane (release · rc · dev · branch · imported) · gate inputs · publish 17 outputs</text>
+    <rect x="1075" y="332" width="36" height="18" rx="9" class="count-pill"/>
+    <text x="1093" y="345" text-anchor="middle" class="mod-c">0</text>
+  </g>
+
+  <line x1="600" y1="376" x2="600" y2="406" class="flow"/>
+
+  <!-- ============== STAGE 1: parallel pre-build scans ============== -->
+  <text x="70" y="402" class="stage-l">Stage 1 · pre-build scans · 3-way parallel</text>
+  <g filter="url(#shadow)">
+    <rect x="70" y="408" width="340" height="92" rx="10" class="panel"/>
+    <rect x="70" y="408" width="5" height="92" rx="2" class="accent-emerald"/>
+    <text x="93" y="432" class="mod-h">secrets-scan</text>
+    <text x="93" y="451" class="mod-s">Gitleaks · source + git history</text>
+    <text x="93" y="469" class="mod-s">SARIF → code-scanning</text>
+    <text x="93" y="487" class="mod-c">enable_gitleaks · allow_secrets_bypass</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="430" y="408" width="340" height="92" rx="10" class="panel"/>
+    <rect x="430" y="408" width="5" height="92" rx="2" class="accent-emerald"/>
+    <text x="453" y="432" class="mod-h">checkov</text>
+    <text x="453" y="451" class="mod-s">OSS · Dockerfile IaC misconfig</text>
+    <text x="453" y="469" class="mod-s">no Bridgecrew callout</text>
+    <text x="453" y="487" class="mod-c">enable_checkov · allow_dockerfile_scan_bypass</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="790" y="408" width="340" height="92" rx="10" class="panel"/>
+    <rect x="790" y="408" width="5" height="92" rx="2" class="accent-emerald"/>
+    <text x="813" y="432" class="mod-h">hadolint</text>
+    <text x="813" y="451" class="mod-s">Dockerfile lint · SARIF</text>
+    <text x="813" y="469" class="mod-s">error-level → fail-closed gate</text>
+    <text x="813" y="487" class="mod-c">enable_hadolint · allow_dockerfile_scan_bypass</text>
+  </g>
+
+  <!-- Fan-in arrows from stage 1 to stage 2 -->
+  <path d="M 240 500 Q 240 520 600 532" class="flow-fan"/>
+  <path d="M 600 500 L 600 532" class="flow"/>
+  <path d="M 960 500 Q 960 520 600 532" class="flow-fan"/>
+  <circle r="3.5" class="packet">
+    <animate attributeName="cx" values="600;600" dur="1.6s" repeatCount="indefinite"/>
+    <animate attributeName="cy" values="510;530" dur="1.6s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.2;0.8;1" dur="1.6s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- ============== STAGE 2: build + Trivy ============== -->
+  <text x="70" y="552" class="stage-l">Stage 2 · build + image scan</text>
+  <g filter="url(#shadow)">
+    <rect x="70" y="558" width="1060" height="92" rx="10" class="panel"/>
+    <rect x="70" y="558" width="5" height="92" rx="2" class="accent-emerald"/>
+    <text x="93" y="582" class="panel-h">build-and-scan</text>
+    <text x="93" y="601" class="panel-s">buildx --load · GHA layer cache · Trivy single invocation</text>
+    <g>
+      <rect x="93"  y="612" width="156" height="28" rx="6" class="nested"/>
+      <text x="171" y="630" text-anchor="middle" class="card-s">vuln (CRITICAL · HIGH)</text>
+    </g>
+    <g>
+      <rect x="259" y="612" width="156" height="28" rx="6" class="nested"/>
+      <text x="337" y="630" text-anchor="middle" class="card-s">secret (always fail)</text>
+    </g>
+    <g>
+      <rect x="425" y="612" width="156" height="28" rx="6" class="nested"/>
+      <text x="503" y="630" text-anchor="middle" class="card-s">misconfig (CIS)</text>
+    </g>
+    <g>
+      <rect x="591" y="612" width="156" height="28" rx="6" class="nested"/>
+      <text x="669" y="630" text-anchor="middle" class="card-s">license · restricted set</text>
+    </g>
+    <g>
+      <rect x="757" y="612" width="200" height="28" rx="6" class="nested"/>
+      <text x="857" y="630" text-anchor="middle" class="card-s">CycloneDX SBOM</text>
+    </g>
+    <rect x="970" y="612" width="148" height="28" rx="6" class="count-pill"/>
+    <text x="1044" y="630" text-anchor="middle" class="mod-c">enable_trivy · allow_scan_bypass</text>
+  </g>
+
+  <line x1="600" y1="650" x2="600" y2="680" class="flow"/>
+
+  <!-- ============== STAGE 3: sign-container ============== -->
+  <text x="70" y="676" class="stage-l">Stage 3 · sign · environment-gated</text>
+  <g filter="url(#shadow)" class="pulse">
+    <rect x="70" y="682" width="1060" height="76" rx="10" class="panel"/>
+    <rect x="70" y="682" width="5" height="76" rx="2" class="accent-violet"/>
+    <text x="93" y="706" class="panel-h">sign-container</text>
+    <text x="93" y="725" class="panel-s">Cosign keyless via Sigstore · OIDC token · SBOM attestation · vulnerability-report attestation</text>
+    <text x="93" y="743" class="mod-c">sign_container · enable_cosign · enable_vuln_attestation</text>
+    <g>
+      <rect x="966" y="700" width="150" height="22" rx="11" class="env-pill"/>
+      <text x="1041" y="715" text-anchor="middle" font-size="11" font-weight="600" fill="#6B21A8">env: kscp-signed-image</text>
+    </g>
+  </g>
+
+  <line x1="600" y1="758" x2="600" y2="788" class="flow"/>
+
+  <!-- ============== STAGE 4: signed_image + approvals ============== -->
+  <text x="70" y="784" class="stage-l">Stage 4 · approval capture · 2-way parallel</text>
+  <g filter="url(#shadow)">
+    <rect x="70" y="790" width="520" height="82" rx="10" class="panel"/>
+    <rect x="70" y="790" width="5" height="82" rx="2" class="accent-violet"/>
+    <text x="93" y="814" class="mod-h">signed_image</text>
+    <text x="93" y="833" class="mod-s">surface signed digest to caller as output</text>
+    <text x="93" y="851" class="mod-c">signed_digest · image_uri</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="610" y="790" width="520" height="82" rx="10" class="panel"/>
+    <rect x="610" y="790" width="5" height="82" rx="2" class="accent-violet"/>
+    <text x="633" y="814" class="mod-h">approvals</text>
+    <text x="633" y="833" class="mod-s">capture reviewer · timestamp · run URL · workflow SHA</text>
+    <text x="633" y="851" class="mod-c">GitHub Environments REST API</text>
+  </g>
+
+  <!-- Fan-in -->
+  <path d="M 330 872 Q 330 892 600 904" class="flow-fan"/>
+  <path d="M 870 872 Q 870 892 600 904" class="flow-fan"/>
+
+  <!-- ============== STAGE 5: record-of-approvals ============== -->
+  <text x="70" y="900" class="stage-l">Stage 5 · record</text>
+  <g filter="url(#shadow)">
+    <rect x="70" y="906" width="1060" height="58" rx="10" class="panel"/>
+    <rect x="70" y="906" width="5" height="58" rx="2" class="accent-violet"/>
+    <text x="93" y="930" class="mod-h">record-of-approvals</text>
+    <text x="93" y="948" class="mod-s">tamper-evident approver metadata JSON · attached to run as artifact · digest pinned</text>
+  </g>
+
+  <line x1="600" y1="964" x2="600" y2="994" class="flow"/>
+
+  <!-- ============== STAGE 6: publish (Skopeo) ============== -->
+  <text x="70" y="990" class="stage-l">Stage 6 · publish</text>
+  <g filter="url(#shadow)" class="pulse">
+    <rect x="70" y="996" width="1060" height="76" rx="10" class="panel"/>
+    <rect x="70" y="996" width="5" height="76" rx="2" class="accent-sky"/>
+    <text x="93" y="1020" class="panel-h">publish</text>
+    <text x="93" y="1039" class="panel-s">Skopeo atomic multi-tag retag · no layer re-push · one staging digest → many tags</text>
+    <g>
+      <rect x="93"  y="1048" width="120" height="20" rx="6" class="nested"/>
+      <text x="153" y="1062" text-anchor="middle" class="card-s">&lt;version&gt;</text>
+      <rect x="223" y="1048" width="120" height="20" rx="6" class="nested"/>
+      <text x="283" y="1062" text-anchor="middle" class="card-s">&lt;lane&gt;</text>
+      <rect x="353" y="1048" width="120" height="20" rx="6" class="nested"/>
+      <text x="413" y="1062" text-anchor="middle" class="card-s">latest</text>
+      <rect x="483" y="1048" width="120" height="20" rx="6" class="nested"/>
+      <text x="543" y="1062" text-anchor="middle" class="card-s">&lt;sha&gt;</text>
+    </g>
+    <text x="970" y="1062" text-anchor="middle" class="mod-c">push · dry_run</text>
+  </g>
+
+  <line x1="600" y1="1072" x2="600" y2="1102" class="flow"/>
+
+  <!-- ============== STAGE 7: octopus + slsa-provenance ============== -->
+  <text x="70" y="1098" class="stage-l">Stage 7 · attestations · 2-way parallel</text>
+  <g filter="url(#shadow)">
+    <rect x="70" y="1104" width="520" height="78" rx="10" class="panel"/>
+    <rect x="70" y="1104" width="5" height="78" rx="2" class="accent-amber"/>
+    <text x="93" y="1128" class="mod-h">slsa-provenance</text>
+    <text x="93" y="1147" class="mod-s">slsa-github-generator (tag-referenced builder)</text>
+    <text x="93" y="1165" class="mod-c">SLSA Level 3 · in-toto attestation</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="610" y="1104" width="520" height="78" rx="10" class="panel"/>
+    <rect x="610" y="1104" width="5" height="78" rx="2" class="accent-slate"/>
+    <text x="633" y="1128" class="mod-h">octopus</text>
+    <text x="633" y="1147" class="mod-s">build info passthrough · non-blocking</text>
+    <text x="633" y="1165" class="mod-c">enable_octopus · continue-on-error</text>
+  </g>
+
+  <!-- Flow: publish → Artifact Registry (crosses container boundary) -->
+  <line x1="600" y1="1166" x2="600" y2="1208" class="flow"/>
+  <text x="612" y="1192" class="meta">skopeo copy</text>
+  <circle r="4.5" class="packet">
+    <animate attributeName="cx" values="600;600" dur="1.8s" repeatCount="indefinite"/>
+    <animate attributeName="cy" values="1166;1208" dur="1.8s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.12;0.88;1" dur="1.8s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- ==================== ARTIFACT REGISTRY (external) ==================== -->
+  <g filter="url(#shadow)">
+    <rect x="380" y="1212" width="440" height="50" rx="10" class="panel"/>
+    <rect x="380" y="1212" width="5" height="50" rx="2" class="accent-sky"/>
+    <g transform="translate(403,1224)">
+      <rect x="-2" y="-2" width="28" height="28" rx="6" class="glyph-bg"/>
+      <rect x="5" y="6" width="16" height="4" rx="1" class="glyph"/>
+      <rect x="5" y="12" width="16" height="4" rx="1" class="glyph"/>
+      <rect x="5" y="18" width="16" height="4" rx="1" class="glyph"/>
+    </g>
+    <text x="450" y="1234" class="panel-h">GCP Artifact Registry</text>
+    <text x="450" y="1252" class="panel-s">europe-west1-docker.pkg.dev / kd-ix-eur-shr-artifacts / approved-images</text>
+  </g>
+
+  <!-- Footer -->
+  <text x="40" y="1278" class="footer">Every external tool is independently switchable via enable_* and bypassable under audit via allow_*_bypass. Defaults fail closed.</text>
+</svg>

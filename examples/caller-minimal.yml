@@ -1,0 +1,34 @@
+name: build-and-publish (minimal KSCP caller)
+
+# Smallest possible KSCP caller. Validated against kscp v1.0.0.
+#
+# Copy this file into your service repo at .github/workflows/build.yml and
+# replace IMAGE_NAME with your service's image name.
+
+on:
+  push:
+    branches: [main, develop]
+    tags: ['v*']
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  id-token: write
+  contents: read
+  packages: write
+  actions: read
+  security-events: write
+
+jobs:
+  kscp:
+    uses: konecta-ix/kscp/.github/workflows/scp.yml@v1
+    with:
+      image_name: kix-app-myservice
+      ar_registry: europe-west1-docker.pkg.dev/kd-ix-eur-shr-artifacts/approved-images
+      environment: ${{ github.ref == 'refs/heads/main' && 'prod' || (github.ref == 'refs/heads/develop' && 'dev' || 'dev') }}
+      # PRs run scans but don't push or sign.
+      dry_run: ${{ github.event_name == 'pull_request' }}
+    secrets:
+      OCTOPUS_API_KEY: ${{ secrets.OCTOPUS_API_KEY }}
+      WORKLOAD_REPO_APP_ID: ${{ secrets.WORKLOAD_REPO_APP_ID }}
+      WORKLOAD_REPO_APP_PRIVATE_KEY: ${{ secrets.WORKLOAD_REPO_APP_PRIVATE_KEY }}

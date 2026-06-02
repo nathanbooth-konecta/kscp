@@ -1,0 +1,82 @@
+name: Pin audit
+
+# Verifies every third-party action used in scp.yml + other workflows is pinned
+# to a 40-character commit SHA (FR-4). Fails on any unpinned `uses:` outside
+# the actions/* and konecta-ix/* namespaces, with a documented exemption for
+# slsa-framework/slsa-github-generator/.github/workflows/*.yml (a reusable
+# workflow that GitHub resolves by ref-tag-then-SHA at runtime).
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/**'
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  audit:
+    name: pin-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Audit pins
+        run: |
+          set -euo pipefail
+          fail=0
+          # Allow-list namespaces that don't need SHA pinning (first-party only).
+          allow_re='^(actions|konecta-ix|github)/'
+          # Reusable workflows from the SLSA framework must be ref'd by tag for
+          # GitHub's reusable-workflow resolver to honour the trusted-builder check.
+          slsa_re='^slsa-framework/slsa-github-generator/'
+          while read -r file; do
+            while IFS= read -r line; do
+              # Strip leading whitespace + 'uses:'.
+              ref="$(printf '%s' "$line" | sed -E 's/.*uses:[[:space:]]*//' | awk '{print $1}')"
+              [[ -z "$ref" ]] && continue
+              # Skip local same-repo references (./...) — they're pinned by
+              # construction to the current commit.
+              if [[ "$ref" == ./* || "$ref" == .github/* ]]; then
+                continue
+              fi
+              # ref must contain '@'.
+              if [[ "$ref" != *@* ]]; then
+                echo "::error file=$file::Action '$ref' is missing an @version"
+                fail=1
+                continue
+              fi
+              name="${ref%@*}"
+              ver="${ref##*@}"
+              # Skip allow-listed namespaces.
+              if [[ "$name" =~ $allow_re ]]; then
+                continue
+              fi
+              # Reusable SLSA workflow exemption (must use tag).
+              if [[ "$name" =~ $slsa_re ]]; then
+                if [[ "$ver" =~ ^v[0-9]+(\.[0-9]+(\.[0-9]+)?)?$ ]]; then
+                  continue
+                fi
+                echo "::error file=$file::SLSA reusable workflow '$name' must be tagged (got '$ver')"
+                fail=1
+                continue
+              fi
+              # Everyone else: 40-char hex SHA only.
+              if ! [[ "$ver" =~ ^[0-9a-f]{40}$ ]]; then
+                echo "::error file=$file::Action '$name' is not SHA-pinned (got '$ver')"
+                fail=1
+              fi
+            done < <(grep -E '^[[:space:]]*uses:' "$file" || true)
+          done < <(find .github/workflows examples -name '*.yml' -type f)
+          if [[ "$fail" -ne 0 ]]; then
+            echo "::error::Pin audit failed. Update unpinned actions to a 40-char commit SHA."
+            exit 1
+          fi
+          echo "::notice::Pin audit passed."

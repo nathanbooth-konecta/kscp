@@ -1,0 +1,4 @@
+FROM alpine:3.11
+RUN apk add --no-cache ca-certificates
+USER 65534
+ENTRYPOINT ["/bin/sh", "-c", "echo kscp-negative-vuln-fixture"]

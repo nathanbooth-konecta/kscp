@@ -1,0 +1,54 @@
+name: Test - end-to-end (dry_run)
+
+# Verifies the full scan chain runs without pushing or signing (dry_run mode).
+# Exercises checkov, hadolint, gitleaks, Trivy (all sub-scanners) and SBOM
+# generation against the test fixture.
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/scp.yml'
+      - '.github/workflows/test-e2e.yml'
+      - 'test/**'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/scp.yml'
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+  security-events: write
+
+jobs:
+  e2e-dryrun:
+    uses: ./.github/workflows/scp.yml
+    with:
+      image_name: kscp-e2e-test
+      ar_registry: localhost:5000
+      environment: dev
+      dockerfile_path: ./test/fixtures/Dockerfile.simple
+      build_context: ./test/fixtures
+      dry_run: true
+      scan_dockerfile: true
+      enable_checkov: true
+      enable_hadolint: true
+      enable_gitleaks: true
+      gitleaks_scan_mode: head
+      enable_trivy: true
+      enable_trivy_vuln: true
+      enable_trivy_secrets: true
+      enable_trivy_misconfig: true
+      enable_trivy_license: true
+      sign_container: true
+      enable_cosign: true
+      enable_vuln_attestation: true
+      enable_slsa_provenance: true
+      enable_octopus: false
+      enable_compliance_pr: false
+      push: true
+      # Findings on the bare fixture image must not fail the test run.
+      allow_dockerfile_scan_bypass: true
+      allow_scan_bypass: true
+      allow_secrets_bypass: true

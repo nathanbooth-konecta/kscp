@@ -1,0 +1,46 @@
+name: Test - air-gapped (all toggles off)
+
+# Verifies US-013 / FR-18: with every external tool disabled and push=false,
+# scp.yml builds the test fixture image successfully and makes no outbound calls
+# to Sigstore, Aqua, Bridgecrew, Hadolint, Gitleaks, SLSA generator or Octopus.
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/scp.yml'
+      - '.github/workflows/test-air-gapped.yml'
+      - 'test/**'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/scp.yml'
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+  security-events: write
+
+jobs:
+  air-gapped:
+    name: air-gapped-call
+    # Direct, in-repo invocation of scp.yml for the self-test fixture.
+    uses: ./.github/workflows/scp.yml
+    with:
+      image_name: kscp-air-gapped-test
+      ar_registry: localhost:5000
+      environment: dev
+      dockerfile_path: ./test/fixtures/Dockerfile.simple
+      build_context: ./test/fixtures
+      scan_dockerfile: false
+      enable_checkov: false
+      enable_hadolint: false
+      enable_gitleaks: false
+      enable_trivy: false
+      sign_container: false
+      enable_cosign: false
+      enable_slsa_provenance: false
+      enable_octopus: false
+      enable_compliance_pr: false
+      enable_vuln_attestation: false
+      push: false

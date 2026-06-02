@@ -1,0 +1,40 @@
+name: promote-built-image (KSCP rescan + resign of an existing image)
+
+# Use this caller when you have a pre-built image URI (built by a non-KSCP
+# pipeline or upstream vendor) and want to rescan, resign and republish it
+# under your service's tags. Validated against kscp v1.0.0.
+
+on:
+  workflow_dispatch:
+    inputs:
+      built_image:
+        description: 'Pre-built image URI to rescan/sign (e.g. registry/ns/image:tag)'
+        required: true
+        type: string
+      target_environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options: [dev, qa, prod]
+        default: dev
+
+permissions:
+  id-token: write
+  contents: read
+  packages: write
+  actions: read
+  security-events: write
+
+jobs:
+  kscp:
+    uses: konecta-ix/kscp/.github/workflows/scp.yml@v1
+    with:
+      image_name: kix-app-promoted
+      ar_registry: europe-west1-docker.pkg.dev/kd-ix-eur-shr-artifacts/approved-images
+      environment: ${{ inputs.target_environment }}
+      built_image: ${{ inputs.built_image }}
+      # Source-tree scans don't apply to an imported image; KSCP auto-skips them.
+      # Image-level scans + signing still run.
+    secrets:
+      WORKLOAD_REPO_APP_ID: ${{ secrets.WORKLOAD_REPO_APP_ID }}
+      WORKLOAD_REPO_APP_PRIVATE_KEY: ${{ secrets.WORKLOAD_REPO_APP_PRIVATE_KEY }}

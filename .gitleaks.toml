@@ -1,0 +1,25 @@
+# KSCP gitleaks configuration. Inherits the upstream defaults and adds the
+# project-specific allowlist below.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "KSCP project allowlist"
+
+# tasks/ is the PRD + review-tool deliverables directory. It is not shipped in
+# any image and not part of the workflow logic; exclude it from secret scans.
+paths = [
+  '''tasks/.*''',
+  # Deliberately-bad fixtures for the negative-test suite. These contain
+  # synthetic non-secret tokens used by test/test-negative-cases.sh to prove
+  # the workflow's gitleaks gate fails closed. They MUST be excluded from the
+  # repo's own scan (FR-6) but are still detected by the standalone driver,
+  # which runs gitleaks against a tempdir copy (no .gitleaks.toml present).
+  '''test/fixtures/bad/.*''',
+]
+
+# Specific known-safe strings that match generic-secret rules but are not
+# secrets (localStorage keys, well-known label IDs, etc).
+regexes = [
+  '''kscp-prd-decisions-v\d+''',
+]

@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>KSCP PRD — Open Questions Review</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #151823;
+    --panel-2: #1c2030;
+    --border: #2a2f42;
+    --text: #e6e8ef;
+    --text-dim: #9098ad;
+    --accent: #3ddc97;
+    --accent-dim: #1f8a5f;
+    --warn: #f5b942;
+    --danger: #ef5b5b;
+    --selected: #1f3f31;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "SF Pro Text", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+  }
+  .container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 40px 24px 120px;
+  }
+  header {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 24px;
+    margin-bottom: 32px;
+  }
+  h1 {
+    margin: 0 0 8px;
+    font-size: 28px;
+    letter-spacing: -0.5px;
+  }
+  h1 .accent { color: var(--accent); }
+  .subtitle {
+    color: var(--text-dim);
+    font-size: 14px;
+    margin: 0;
+  }
+  .meta {
+    display: flex;
+    gap: 24px;
+    margin-top: 16px;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  .meta strong { color: var(--text); }
+  .progress-bar {
+    margin-top: 16px;
+    height: 6px;
+    background: var(--panel-2);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: var(--accent);
+    width: 0%;
+    transition: width 0.3s ease;
+  }
+  .question-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 20px;
+    overflow: hidden;
+    transition: border-color 0.2s;
+  }
+  .question-card.decided {
+    border-color: var(--accent-dim);
+  }
+  .question-header {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+  }
+  .question-number {
+    background: var(--panel-2);
+    color: var(--accent);
+    font-weight: 600;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 14px;
+  }
+  .question-text {
+    flex: 1;
+  }
+  .question-tag {
+    display: inline-block;
+    background: var(--panel-2);
+    color: var(--text-dim);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    margin-bottom: 8px;
+  }
+  .question-title {
+    font-size: 16px;
+    font-weight: 500;
+    margin: 0;
+  }
+  .question-body {
+    padding: 16px 24px 20px;
+  }
+  .options {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .option {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .option:hover {
+    border-color: var(--accent-dim);
+  }
+  .option.selected {
+    background: var(--selected);
+    border-color: var(--accent);
+  }
+  .option-radio {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 2px solid var(--text-dim);
+    flex-shrink: 0;
+    margin-top: 2px;
+    position: relative;
+  }
+  .option.selected .option-radio {
+    border-color: var(--accent);
+  }
+  .option.selected .option-radio::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+  .option-content {
+    flex: 1;
+  }
+  .option-label {
+    font-weight: 500;
+    color: var(--text);
+    margin-bottom: 2px;
+  }
+  .option-desc {
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  .option-tag {
+    display: inline-block;
+    font-size: 10px;
+    background: var(--accent-dim);
+    color: var(--text);
+    padding: 2px 6px;
+    border-radius: 3px;
+    margin-left: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    vertical-align: middle;
+  }
+  .notes-field {
+    margin-top: 12px;
+  }
+  .notes-field label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .notes-field textarea {
+    width: 100%;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 10px 12px;
+    font-family: inherit;
+    font-size: 14px;
+    resize: vertical;
+    min-height: 60px;
+  }
+  .notes-field textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .footer-actions {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: rgba(15, 17, 23, 0.95);
+    backdrop-filter: blur(10px);
+    border-top: 1px solid var(--border);
+    padding: 16px 24px;
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    z-index: 10;
+  }
+  .btn {
+    padding: 10px 20px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.15s;
+  }
+  .btn:hover {
+    border-color: var(--accent);
+  }
+  .btn-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #0a1810;
+  }
+  .btn-primary:hover {
+    background: #4eea9f;
+  }
+  .btn-primary:disabled {
+    background: var(--accent-dim);
+    border-color: var(--accent-dim);
+    color: var(--text-dim);
+    cursor: not-allowed;
+  }
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    background: var(--panel-2);
+    color: var(--text-dim);
+  }
+  .status-pill.complete {
+    background: var(--accent-dim);
+    color: var(--text);
+  }
+  .toast {
+    position: fixed;
+    bottom: 90px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--accent);
+    color: #0a1810;
+    padding: 12px 24px;
+    border-radius: 6px;
+    font-weight: 500;
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+    z-index: 20;
+  }
+  .toast.show { opacity: 1; }
+  details summary {
+    cursor: pointer;
+    color: var(--text-dim);
+    font-size: 13px;
+    margin-top: 8px;
+  }
+  details summary:hover { color: var(--accent); }
+  .context {
+    margin-top: 8px;
+    padding: 12px;
+    background: var(--panel-2);
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--text-dim);
+    border-left: 3px solid var(--accent-dim);
+  }
+  .context strong { color: var(--text); }
+  @media (max-width: 600px) {
+    .container { padding: 24px 16px 140px; }
+    .question-header { padding: 16px; }
+    .question-body { padding: 12px 16px 16px; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>KSCP PRD — <span class="accent">Open Questions Review</span></h1>
+    <p class="subtitle">Konecta Secure Container Pipeline (v4.1.6) · Review and approve the unresolved decisions before implementation.</p>
+    <div class="meta">
+      <span><strong>Document:</strong> tasks/prd-konecta-secure-container-pipeline.md</span>
+      <span><strong>Owner:</strong> Nathan Booth</span>
+      <span id="status"><strong>Decisions:</strong> 0 / 7</span>
+    </div>
+    <div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
+  </header>
+
+  <div id="questions"></div>
+</div>
+
+<div class="toast" id="toast">Copied to clipboard</div>
+
+<div class="footer-actions">
+  <button class="btn" id="resetBtn">Reset</button>
+  <button class="btn" id="copyBtn">Copy as Markdown</button>
+  <button class="btn" id="downloadBtn">Download JSON</button>
+  <button class="btn btn-primary" id="approveBtn" disabled>Approve All Decisions</button>
+</div>
+
+<script>
+const QUESTIONS = [
+  {
+    id: 'compliance-repo-auth',
+    tag: 'Auth · §9.1',
+    title: 'Should `compliance_repo` use a GitHub App token or a PAT?',
+    context: 'The <code>record_of_approvals</code> job optionally opens a PR to a separate audit-trail repo. <code>image-promote.yml</code> already uses a GitHub App (<code>WORKLOAD_REPO_APP_ID</code>) for cross-repo pushes.',
+    options: [
+      { id: 'reuse-app', label: 'Reuse existing workload-repo GitHub App', desc: 'Add the audit-trail repo to the existing app\'s installation. Zero new infra; one app already trusted across the org.', recommended: true },
+      { id: 'new-app', label: 'Provision a new kscp-compliance App', desc: 'Dedicated app, scoped only to the audit-trail repo. Cleaner blast radius but new secret + ownership to manage.' },
+      { id: 'pat', label: 'Use a PAT', desc: 'Simplest to set up but ties commits to a single user and expires. Not recommended for production audit flows.' }
+    ]
+  },
+  {
+    id: 'long-term-retention',
+    tag: 'Retention · §9.2',
+    title: 'Should `record_of_approvals` Markdown also be uploaded to GCS for retention beyond 365 days?',
+    context: 'GitHub Actions artifacts cap at 365-day retention. Auditors may need 7+ year retention for SOC 2 / ISO 27001. A GCS bucket like <code>gs://kd-ix-eur-shr-audit/kscp/</code> would extend retention.',
+    options: [
+      { id: 'gcs-yes', label: 'Yes — upload to GCS as part of record_of_approvals', desc: 'Add a GCS upload step gated by <code>enable_gcs_archive</code>. Bucket path templated by image/date.', recommended: true },
+      { id: 'gcs-later', label: 'Defer to v4.2', desc: 'Ship v4.1.6 with GitHub artifacts only. Add GCS once a bucket and lifecycle policy exist.' },
+      { id: 'gcs-no', label: 'No — 365 days is sufficient', desc: 'Rely on the optional compliance_repo PR (git history) for long-term retention.' }
+    ]
+  },
+  {
+    id: 'dry-run-input',
+    tag: 'API · §9.3',
+    title: 'Add an explicit `dry_run` input, or rely on existing toggles?',
+    context: 'A "preview" run for PRs would skip push + signing. This is already expressible as <code>push=false sign_container=false</code>, but a named mode is more discoverable.',
+    options: [
+      { id: 'dry-existing', label: 'Use existing toggles (push=false, sign_container=false)', desc: 'No new input; document the combination as the canonical PR-preview pattern. Smaller API surface.', recommended: true },
+      { id: 'dry-explicit', label: 'Add explicit dry_run input', desc: 'A single boolean that implies the other two. Easier for callers but adds one more API contract to maintain.' },
+      { id: 'dry-both', label: 'Add dry_run as an alias', desc: 'Accept either pattern; dry_run=true overrides push and sign_container. Most flexible, most code paths.' }
+    ]
+  },
+  {
+    id: 'multi-arch',
+    tag: 'Build · §9.4',
+    title: 'Multi-arch (linux/arm64) — ship in v4.1.6 or punt to v4.2?',
+    context: 'US-005 already lists <code>platforms</code> as an input. The work is mostly adding <code>docker/setup-qemu-action</code> and switching <code>load: true</code> off when more than one platform is requested.',
+    options: [
+      { id: 'arch-v4.1', label: 'Ship in v4.1.6 as optional input (default linux/amd64)', desc: 'No regression risk for current consumers. ARM users opt in. Adds ~30 min of work.', recommended: true },
+      { id: 'arch-v4.2', label: 'Defer to v4.2', desc: 'Keep v4.1.6 scope tight. Add multi-arch once a consumer actually needs it.' }
+    ]
+  },
+  {
+    id: 'slsa-provenance',
+    tag: 'Supply chain · §9.5',
+    title: 'Emit OpenSSF Scorecard / SLSA Level 3 provenance attestations on day one?',
+    context: 'SLSA L3 provenance is produced by <code>slsa-framework/slsa-github-generator</code>. It adds another signed attestation alongside the Cosign signature and SBOM. Required for highest-tier compliance frameworks.',
+    options: [
+      { id: 'slsa-v4.2', label: 'Defer to v4.2', desc: 'Ship Cosign + SBOM first, layer SLSA on once the base flow is stable. Recommended given current scope.', recommended: true },
+      { id: 'slsa-now', label: 'Include in v4.1.6', desc: 'Add as another job (slsa-provenance) gated by <code>enable_slsa_provenance</code>. More upfront effort, but one cohesive supply-chain story.' },
+      { id: 'slsa-never', label: 'Not on the roadmap', desc: 'Cosign signature + SBOM is sufficient for our compliance posture; SLSA L3 is out of scope.' }
+    ]
+  },
+  {
+    id: 'dockerfile-linter',
+    tag: 'Tooling · §9.6',
+    title: 'Confirm Hadolint as the long-term Dockerfile linter (vs dockerfilelint / dockle)?',
+    context: 'The v4.1.6 design shows Hadolint. Hadolint is the de-facto OSS standard, active, has a maintained GitHub Action with SARIF output, and complements Checkov well (style vs security).',
+    options: [
+      { id: 'hadolint', label: 'Hadolint — confirmed', desc: 'Matches the design doc. Pin to latest stable SHA, run alongside Checkov.', recommended: true },
+      { id: 'dockle', label: 'Switch to Dockle', desc: 'Dockle focuses on CIS Docker Benchmark. Overlaps with Trivy more than Checkov.' },
+      { id: 'eval-both', label: 'Evaluate both during alpha', desc: 'Wire up both behind feature flags in v4.1.6, pick one in v4.2.' }
+    ]
+  },
+  {
+    id: 'checkov-license',
+    tag: 'Tooling · §9.7',
+    title: 'Checkov OSS action vs Prisma Cloud licensed integration?',
+    context: 'Checkov is OSS (Apache 2.0). Bridgecrew/Prisma Cloud offers a paid platform that ingests Checkov results centrally. We need to confirm no licence concern with using the OSS action in CI.',
+    options: [
+      { id: 'oss-only', label: 'OSS action only — no Prisma Cloud integration', desc: 'No licence concerns. Findings stay in GitHub code scanning. Simplest path.', recommended: true },
+      { id: 'evaluate-prisma', label: 'Evaluate Prisma Cloud integration in v4.2', desc: 'Ship OSS for now; revisit if security team wants centralised dashboarding.' },
+      { id: 'switch-to-other', label: 'Switch to a different IaC scanner', desc: 'Consider trivy-config or tfsec instead. Trivy already in the pipeline — fewer moving parts.' }
+    ]
+  }
+];
+
+const STORAGE_KEY = 'kscp-prd-decisions-v1';
+const decisions = {};
+
+function loadDecisions() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      Object.assign(decisions, parsed);
+    }
+  } catch (e) {}
+}
+
+function saveDecisions() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(decisions));
+  } catch (e) {}
+}
+
+function render() {
+  const root = document.getElementById('questions');
+  root.innerHTML = '';
+  QUESTIONS.forEach((q, i) => {
+    const decided = !!decisions[q.id]?.choice;
+    const card = document.createElement('div');
+    card.className = 'question-card' + (decided ? ' decided' : '');
+
+    const header = document.createElement('div');
+    header.className = 'question-header';
+    header.innerHTML = `
+      <div class="question-number">${i + 1}</div>
+      <div class="question-text">
+        <span class="question-tag">${q.tag}</span>
+        <h3 class="question-title">${q.title}</h3>
+      </div>
+      <span class="status-pill ${decided ? 'complete' : ''}">${decided ? '✓ Decided' : 'Pending'}</span>
+    `;
+    card.appendChild(header);
+
+    const body = document.createElement('div');
+    body.className = 'question-body';
+
+    const context = document.createElement('div');
+    context.className = 'context';
+    context.innerHTML = `<strong>Context:</strong> ${q.context}`;
+    body.appendChild(context);
+
+    const options = document.createElement('div');
+    options.className = 'options';
+    q.options.forEach(opt => {
+      const isSelected = decisions[q.id]?.choice === opt.id;
+      const optEl = document.createElement('div');
+      optEl.className = 'option' + (isSelected ? ' selected' : '');
+      optEl.innerHTML = `
+        <div class="option-radio"></div>
+        <div class="option-content">
+          <div class="option-label">${opt.label}${opt.recommended ? '<span class="option-tag">Recommended</span>' : ''}</div>
+          <div class="option-desc">${opt.desc}</div>
+        </div>
+      `;
+      optEl.addEventListener('click', () => {
+        decisions[q.id] = { ...(decisions[q.id] || {}), choice: opt.id, choiceLabel: opt.label };
+        saveDecisions();
+        render();
+      });
+      options.appendChild(optEl);
+    });
+    body.appendChild(options);
+
+    const notes = document.createElement('div');
+    notes.className = 'notes-field';
+    notes.innerHTML = `
+      <label>Notes / rationale (optional)</label>
+      <textarea placeholder="Capture reasoning, caveats, or follow-up actions…">${decisions[q.id]?.notes || ''}</textarea>
+    `;
+    notes.querySelector('textarea').addEventListener('input', (e) => {
+      decisions[q.id] = { ...(decisions[q.id] || {}), notes: e.target.value };
+      saveDecisions();
+    });
+    body.appendChild(notes);
+
+    card.appendChild(body);
+    root.appendChild(card);
+  });
+
+  updateStatus();
+}
+
+function updateStatus() {
+  const total = QUESTIONS.length;
+  const done = QUESTIONS.filter(q => !!decisions[q.id]?.choice).length;
+  document.getElementById('status').innerHTML = `<strong>Decisions:</strong> ${done} / ${total}`;
+  document.getElementById('progress').style.width = `${(done / total) * 100}%`;
+  document.getElementById('approveBtn').disabled = done < total;
+  document.getElementById('approveBtn').textContent = done < total
+    ? `Approve All Decisions (${done}/${total})`
+    : 'Approve All Decisions';
+}
+
+function toMarkdown() {
+  const date = new Date().toISOString().split('T')[0];
+  let md = `# KSCP PRD — Open Questions Resolution\n\n`;
+  md += `**Date:** ${date}\n**Reviewer:** Nathan Booth\n**PRD:** tasks/prd-konecta-secure-container-pipeline.md\n\n---\n\n`;
+  QUESTIONS.forEach((q, i) => {
+    const d = decisions[q.id];
+    md += `## ${i + 1}. ${q.title}\n\n`;
+    md += `_${q.tag}_\n\n`;
+    if (d?.choice) {
+      const chosen = q.options.find(o => o.id === d.choice);
+      md += `**Decision:** ${chosen.label}\n\n`;
+      md += `**Rationale:** ${chosen.desc}\n\n`;
+      if (d.notes) md += `**Notes:** ${d.notes}\n\n`;
+    } else {
+      md += `**Decision:** _pending_\n\n`;
+    }
+    md += `---\n\n`;
+  });
+  return md;
+}
+
+function showToast(text) {
+  const t = document.getElementById('toast');
+  t.textContent = text;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+document.getElementById('copyBtn').addEventListener('click', () => {
+  navigator.clipboard.writeText(toMarkdown()).then(() => showToast('Markdown copied to clipboard'));
+});
+
+document.getElementById('downloadBtn').addEventListener('click', () => {
+  const out = {
+    prd: 'tasks/prd-konecta-secure-container-pipeline.md',
+    decided_at: new Date().toISOString(),
+    reviewer: 'Nathan Booth',
+    decisions: QUESTIONS.map(q => {
+      const d = decisions[q.id];
+      const chosen = d?.choice ? q.options.find(o => o.id === d.choice) : null;
+      return {
+        id: q.id,
+        question: q.title,
+        choice_id: d?.choice || null,
+        choice_label: chosen?.label || null,
+        choice_description: chosen?.desc || null,
+        notes: d?.notes || null
+      };
+    })
+  };
+  const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `kscp-prd-decisions-${new Date().toISOString().split('T')[0]}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('JSON downloaded');
+});
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+  if (confirm('Reset all decisions? This cannot be undone.')) {
+    for (const k of Object.keys(decisions)) delete decisions[k];
+    saveDecisions();
+    render();
+  }
+});
+
+document.getElementById('approveBtn').addEventListener('click', () => {
+  const md = toMarkdown();
+  navigator.clipboard.writeText(md).then(() => {
+    showToast('Decisions approved — Markdown copied. Paste into the PRD §9 or share with the team.');
+  });
+});
+
+loadDecisions();
+render();
+</script>
+</body>
+</html>

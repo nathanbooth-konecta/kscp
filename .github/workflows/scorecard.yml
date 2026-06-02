@@ -1,0 +1,73 @@
+name: OpenSSF Scorecard
+
+# Self-assessment of the KSCP repository's supply-chain hygiene (US-018, FR-24).
+# Publishes a Scorecard badge and writes findings to GitHub code scanning.
+# This workflow is NOT exposed as workflow_call — it scores the KSCP repo only.
+
+on:
+  branch_protection_rule:
+  schedule:
+    - cron: '23 7 * * 2'   # weekly, Tuesdays 07:23 UTC
+  push:
+    branches: [main]
+
+permissions: read-all
+
+jobs:
+  analysis:
+    name: scorecard
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      security-events: write
+      id-token: write
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - name: Run Scorecard
+        uses: ossf/scorecard-action@f49aabe0b5af0936a0987cfb85d86b75731b0186 # v2.4.1
+        with:
+          results_file: scorecard-results.sarif
+          results_format: sarif
+          publish_results: true
+
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@38697555549f1db7851b81482ff19f1fa5c4fedc # v4
+        with:
+          sarif_file: scorecard-results.sarif
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: scorecard-results
+          path: scorecard-results.sarif
+          retention-days: 30
+
+      - name: Open tracking issue if score < 8.0
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Scorecard SARIF stores per-check scores in runs[0].tool.driver.rules and
+          # the aggregate via runs[0].properties.score (when emitted).
+          score=$(jq -r '.runs[0].properties.score // empty' scorecard-results.sarif)
+          if [[ -z "$score" ]]; then
+            # Fall back to averaging per-rule scores.
+            score=$(jq -r '[.runs[0].tool.driver.rules[]?.properties.score // empty] | add / length' scorecard-results.sarif 2>/dev/null || echo "10")
+          fi
+          echo "Scorecard score: $score"
+          if awk "BEGIN { exit !($score < 8.0) }"; then
+            existing=$(gh issue list --label kscp-scorecard --state open --json number --jq 'length')
+            if [[ "$existing" -eq 0 ]]; then
+              gh issue create \
+                --title "Scorecard score dropped below 8.0 ($score)" \
+                --label kscp-scorecard \
+                --body "Weekly OpenSSF Scorecard run reported a score of $score (target: ≥ 8.0). See the latest workflow run for details."
+            fi
+          fi

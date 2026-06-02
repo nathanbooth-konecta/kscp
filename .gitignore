@@ -1,0 +1,13 @@
+.DS_Store
+.claude/
+*.log
+*.tar
+*.sarif
+trivy-results.*
+sbom-*.cdx.json
+signed_images.txt
+record-of-approvals-*.md
+.act/
+.actrc.local
+/test/output/
+/test/tmp/

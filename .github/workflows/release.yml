@@ -1,0 +1,71 @@
+name: Release
+
+# Tag the kscp repo from version.txt and refresh the floating major-version tag.
+# Triggered manually or by a merge to main that changed version.txt.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_notes:
+        description: Optional notes for the release body
+        required: false
+        type: string
+        default: ''
+  push:
+    branches: [main]
+    paths: [version.txt]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: tag-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+
+      - name: Read version
+        id: ver
+        run: |
+          set -euo pipefail
+          v="$(tr -d '[:space:]' < version.txt)"
+          if ! [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::version.txt='$v' is not valid SemVer"
+            exit 1
+          fi
+          major="${v%%.*}"
+          echo "version=v$v" >> "$GITHUB_OUTPUT"
+          echo "major=v$major" >> "$GITHUB_OUTPUT"
+
+      - name: Verify version tag does not exist
+        env:
+          TAG: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          if git tag --list | grep -Fxq "$TAG"; then
+            echo "::error::Tag $TAG already exists. Bump version.txt before releasing."
+            exit 1
+          fi
+
+      - name: Create release tag + floating major tag
+        env:
+          TAG: ${{ steps.ver.outputs.version }}
+          MAJOR: ${{ steps.ver.outputs.major }}
+          GH_TOKEN: ${{ github.token }}
+          NOTES: ${{ inputs.release_notes }}
+        run: |
+          set -euo pipefail
+          git config user.name 'kscp-release-bot'
+          git config user.email 'kscp-release-bot@konecta.com'
+          git tag -a "$TAG" -m "KSCP $TAG"
+          # Force-move the floating major tag.
+          git tag -f -a "$MAJOR" -m "KSCP $MAJOR (floating)"
+          git push origin "$TAG"
+          git push origin "$MAJOR" --force
+          body="${NOTES:-Released from \`version.txt\`.}"
+          gh release create "$TAG" --title "KSCP $TAG" --notes "$body"

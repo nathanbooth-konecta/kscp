@@ -1,0 +1,34 @@
+extends: default
+
+rules:
+  line-length: disable
+  document-start: disable
+  comments:
+    require-starting-space: true
+    min-spaces-from-content: 1
+  comments-indentation: disable
+  truthy:
+    check-keys: false
+  indentation:
+    indent-sequences: consistent
+  # KSCP uses flow-mapping style for compact workflow input declarations
+  # (`{ required: true, type: string, default: x }`). This is valid YAML and
+  # readable in a wide table — relax the default spacing rules so they don't
+  # trip on it.
+  braces:
+    forbid: false
+    min-spaces-inside: 1
+    max-spaces-inside: 1
+    min-spaces-inside-empty: 0
+    max-spaces-inside-empty: 0
+  brackets:
+    forbid: false
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+  colons:
+    max-spaces-before: 0
+    max-spaces-after: -1
+  commas:
+    max-spaces-before: 0
+    min-spaces-after: 1
+    max-spaces-after: -1
