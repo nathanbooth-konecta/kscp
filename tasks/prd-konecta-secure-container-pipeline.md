@@ -87,7 +87,7 @@ workflow skeleton, README, version file and CODEOWNERS so KSCP can be versioned 
 independently from any consumer.
 
 **Acceptance Criteria:**
-- [ ] `/Users/nathanbooth/code/kscp/.github/workflows/scp.yml` exists and is a valid
+- [ ] `.github/workflows/scp.yml` exists and is a valid
       `workflow_call` workflow (passes `actionlint` and `yamllint`).
 - [ ] Repo contains `README.md`, `CODEOWNERS`, `version.txt` (`1.0.0`),
       `.github/workflows/release.yml` (creates a GitHub Release tag from `version.txt`).

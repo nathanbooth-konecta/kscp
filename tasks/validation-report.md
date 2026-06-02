@@ -1,7 +1,6 @@
 # KSCP v1.0.0 — local validation report
 
 **Date:** 2026-05-28
-**Repo:** `/Users/nathanbooth/code/kscp`
 **Version:** `1.0.0`
 
 ## Tooling installed
@@ -105,7 +104,7 @@ Concrete techniques applied in `scp.yml`:
 | No QEMU unless multi-arch | `if: contains(inputs.platforms, ',')` | ~15–20 s saved for the default single-arch path |
 | Skopeo retag (not re-push) | `skopeo copy docker://staging docker://final` per tag | ~30–60 s (vs `docker push` per tag) |
 
-## Deliverables (25 files, repo root `/Users/nathanbooth/code/kscp/`)
+## Deliverables (25 files, repo root)
 
 ```
 .github/workflows/
