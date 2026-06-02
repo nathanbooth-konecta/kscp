@@ -55,6 +55,7 @@ jobs:
         SHORT_SHA=__SHORT_SHA__
         APP_VERSION=__SHORT_SHA__
     secrets:
-      OCTOPUS_API_KEY: ${{ secrets.OCTOPUS_API_KEY }}
       WORKLOAD_REPO_APP_ID: ${{ secrets.WORKLOAD_REPO_APP_ID }}
       WORKLOAD_REPO_APP_PRIVATE_KEY: ${{ secrets.WORKLOAD_REPO_APP_PRIVATE_KEY }}
+      # Optional: only required when `enable_octopus: true` and repo var OCTOPUS_URL is set.
+      # OCTOPUS_API_KEY: ${{ secrets.OCTOPUS_API_KEY }}

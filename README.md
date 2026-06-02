@@ -189,9 +189,11 @@ jobs:
       ar_registry: europe-west1-docker.pkg.dev/kd-ix-eur-shr-artifacts/approved-images
       environment: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
     secrets:
-      OCTOPUS_API_KEY:               ${{ secrets.OCTOPUS_API_KEY }}
       WORKLOAD_REPO_APP_ID:          ${{ secrets.WORKLOAD_REPO_APP_ID }}
       WORKLOAD_REPO_APP_PRIVATE_KEY: ${{ secrets.WORKLOAD_REPO_APP_PRIVATE_KEY }}
+      # Optional — only required if you set `enable_octopus: true` above and have
+      # the OCTOPUS_URL repo variable set:
+      # OCTOPUS_API_KEY:             ${{ secrets.OCTOPUS_API_KEY }}
 ```
 
 Four more variants — Python CI passthrough, `built_image` promote flow, and

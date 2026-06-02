@@ -29,6 +29,8 @@ jobs:
       # PRs run scans but don't push or sign.
       dry_run: ${{ github.event_name == 'pull_request' }}
     secrets:
-      OCTOPUS_API_KEY: ${{ secrets.OCTOPUS_API_KEY }}
       WORKLOAD_REPO_APP_ID: ${{ secrets.WORKLOAD_REPO_APP_ID }}
       WORKLOAD_REPO_APP_PRIVATE_KEY: ${{ secrets.WORKLOAD_REPO_APP_PRIVATE_KEY }}
+      # Optional integrations — pass only if you opt-in via the matching `with:` flag.
+      # Octopus build-info passthrough (requires `enable_octopus: true` + repo var OCTOPUS_URL):
+      # OCTOPUS_API_KEY: ${{ secrets.OCTOPUS_API_KEY }}
