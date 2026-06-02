@@ -1,8 +1,9 @@
-# Migration: `z_docker-build-push.yml` → KSCP `scp.yml`
+# Migration: legacy `docker-build-push.yml` → KSCP `scp.yml`
 
-This document maps every input on the legacy reusable workflows in
-`konecta-ix-applications/.github-private/.github/workflows/` to its KSCP
-equivalent so consumers can migrate one repo at a time.
+This document maps every input on the legacy reusable docker-build-push
+workflows (the per-team `docker-build-push.yml`, `docker-build-push-python.yml`,
+`image-promote.yml` patterns used inside Konecta) to its KSCP equivalent, so
+consumers can migrate one repo at a time.
 
 ## Field-by-field mapping
 
@@ -50,9 +51,9 @@ equivalent so consumers can migrate one repo at a time.
 
 ## Migrating a service repo
 
-1. **Update the caller workflow.** Replace
-   `uses: konecta-ix/.github-private/.github/workflows/docker-build-push.yml@<sha>`
-   with `uses: konecta-ix/kscp/.github/workflows/scp.yml@v1`. Pass the same
+1. **Update the caller workflow.** Replace the legacy
+   `uses: <legacy-org>/.github-private/.github/workflows/docker-build-push.yml@<sha>`
+   line with `uses: konecta/kscp/.github/workflows/scp.yml@v1`. Pass the same
    inputs; legacy inputs map 1:1 (see table above).
 2. **Add the signing environment.** If you want signing on day one, create a
    GitHub Environment named `kscp-signed-image` (or override via
@@ -70,6 +71,6 @@ equivalent so consumers can migrate one repo at a time.
 
 ## Coexistence guarantee
 
-KSCP v1 does not modify or deprecate any file in
-`konecta-ix-applications/.github-private`. Migration is one repo at a time,
+KSCP v1 does not modify or deprecate any existing per-team `.github-private`
+or legacy docker-build-push workflow files. Migration is one repo at a time,
 on each team's own schedule.

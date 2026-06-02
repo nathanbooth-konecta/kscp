@@ -39,7 +39,7 @@ echo "$IMAGE@$DIGEST"
 
 ```bash
 cosign verify \
-  --certificate-identity-regexp "https://github.com/konecta-ix/.+/.github/workflows/.+@.+" \
+  --certificate-identity-regexp "https://github.com/konecta/.+/.github/workflows/.+@.+" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   "${IMAGE%:*}@${DIGEST}"
 ```
@@ -52,7 +52,7 @@ GitHub Actions OIDC identity (workflow path + ref).
 ```bash
 cosign verify-attestation \
   --type cyclonedx \
-  --certificate-identity-regexp "https://github.com/konecta-ix/.+/.github/workflows/.+@.+" \
+  --certificate-identity-regexp "https://github.com/konecta/.+/.github/workflows/.+@.+" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   "${IMAGE%:*}@${DIGEST}"
 ```
@@ -69,7 +69,7 @@ cosign download attestation "${IMAGE%:*}@${DIGEST}" \
 ```bash
 cosign verify-attestation \
   --type vuln \
-  --certificate-identity-regexp "https://github.com/konecta-ix/.+/.github/workflows/.+@.+" \
+  --certificate-identity-regexp "https://github.com/konecta/.+/.github/workflows/.+@.+" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   "${IMAGE%:*}@${DIGEST}"
 ```
@@ -82,7 +82,7 @@ to evaluate policy against scan output without re-running the scan.
 
 ```bash
 slsa-verifier verify-image \
-  --source-uri github.com/konecta-ix/<your-service-repo> \
+  --source-uri github.com/konecta/<your-service-repo> \
   --source-tag v1.2.3 \
   "${IMAGE%:*}@${DIGEST}"
 ```
@@ -100,7 +100,7 @@ For Kyverno, the relevant policy primitive is `verifyImages` with
 keyless:
   identities:
     - issuer: https://token.actions.githubusercontent.com
-      subjectRegExp: "^https://github\\.com/konecta-ix/.+/\\.github/workflows/.+@.+$"
+      subjectRegExp: "^https://github\\.com/konecta/.+/\\.github/workflows/.+@.+$"
 ```
 
 That regex covers both KSCP itself (when running as a workflow_call source)

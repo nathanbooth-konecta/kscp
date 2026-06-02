@@ -38,7 +38,7 @@ in `.github/workflows/` and `examples/`:
 Audited 51 uses: references; failures: 0
 ```
 
-Allow-list exemptions applied: `actions/*`, `konecta-ix/*`, `github/*`,
+Allow-list exemptions applied: `actions/*`, `konecta/*`, `github/*`,
 local `./*` paths, and the SLSA reusable-workflow tag-pinning exemption
 documented in `docs/pinned-actions.md`.
 
@@ -146,7 +146,7 @@ version.txt                  — 1.0.0
    `docs/pinned-actions.md`). When the upstream cuts a new release, verify the
    tag signature before bumping.
 2. **End-to-end CI run** — `test-air-gapped.yml` and `test-e2e.yml` need a
-   first execution on the konecta-ix/kscp repo to confirm the runner
+   first execution on the konecta/kscp repo to confirm the runner
    integration (WIF, GHA cache, code-scanning upload).
 3. **Cosign keyless** — locally we verified the binary; the actual signing
    round-trip exercises GitHub OIDC + Fulcio + Rekor and can only be
@@ -154,9 +154,9 @@ version.txt                  — 1.0.0
 4. **GitHub Environment for signing** — consumers must create the
    `kscp-signed-image` environment with required reviewers before flipping
    `sign_container: true`. Documented in `docs/migration-from-legacy.md`.
-5. **`konecta-ix` GitHub org policy** — verify that reusable workflows from
-   `konecta-ix/kscp` are allowed by org-level workflow-permission policy for
-   consumer repos. Without this, callers will get a permission denial.
+5. **GitHub org policy** — verify that reusable workflows from `konecta/kscp`
+   are allowed by org-level workflow-permission policy for consumer repos.
+   Without this, callers will get a permission denial.
 
 ## Verdict
 

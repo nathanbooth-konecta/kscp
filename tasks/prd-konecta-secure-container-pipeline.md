@@ -5,9 +5,9 @@
 The Konecta Secure Container Pipeline (KSCP) is a single reusable GitHub Actions workflow
 (`scp.yml`) that standardises how every Konecta service builds, scans, signs and publishes
 container images. It consolidates the existing fragmented patterns found in
-`konecta-ix-applications/.github-private/.github/workflows/` (`docker-build-push.yml`,
+`the legacy docker-build-push workflows in /` (`docker-build-push.yml`,
 `docker-build-push-python.yml`) into a single, opinionated, configurable pipeline that ships
-from a new repository (`konecta-ix/kscp`).
+from a new repository (`konecta/kscp`).
 
 KSCP replaces ad-hoc Dockerfile linting, optional security scanning and inconsistent signing
 with a deterministic, conditional flow whose stages can each be toggled by callers. Every
@@ -49,7 +49,7 @@ on supply-chain hygiene; it does not gate consumer builds.
 
 ## 2. Goals
 
-- Provide a single `workflow_call` workflow (`konecta-ix/kscp/.github/workflows/scp.yml@v1`)
+- Provide a single `workflow_call` workflow (`konecta/kscp/.github/workflows/scp.yml@v1`)
   that every Konecta service can adopt without copy-pasting CI code.
 - Implement all stages from the v1.0.0 design: `setenv`, `checkov`, `hadolint`,
   `gitleaks`, `container-build`, `security-scan` (vulnerability + SBOM + secret +
@@ -82,7 +82,7 @@ on supply-chain hygiene; it does not gate consumer builds.
 
 ### US-001: Repository bootstrap
 
-**Description:** As a platform engineer, I want a new `konecta-ix/kscp` repo seeded with the
+**Description:** As a platform engineer, I want a new `konecta/kscp` repo seeded with the
 workflow skeleton, README, version file and CODEOWNERS so KSCP can be versioned and released
 independently from any consumer.
 
@@ -92,7 +92,7 @@ independently from any consumer.
 - [ ] Repo contains `README.md`, `CODEOWNERS`, `version.txt` (`1.0.0`),
       `.github/workflows/release.yml` (creates a GitHub Release tag from `version.txt`).
 - [ ] An example caller workflow exists in `examples/caller-minimal.yml` and references
-      the new pipeline at `konecta-ix/kscp/.github/workflows/scp.yml@v1`.
+      the new pipeline at `konecta/kscp/.github/workflows/scp.yml@v1`.
 
 ### US-002: SHA-pinned action manifest
 
@@ -100,7 +100,7 @@ independently from any consumer.
 to the SHA of its latest stable release so a malicious tag re-point cannot affect builds.
 
 **Acceptance Criteria:**
-- [ ] Every `uses:` line outside `actions/*` and `konecta-ix/*` references an explicit
+- [ ] Every `uses:` line outside `actions/*` and `konecta/*` (or any namespace in repo variable `ALLOWED_ORG_NAMESPACES`) references an explicit
       40-character commit SHA, with the human-readable version in a `#` trailing comment.
 - [ ] A `docs/pinned-actions.md` table lists every pinned action, its current SHA, the
       release tag it maps to, the release date and the source repo URL.
@@ -277,7 +277,7 @@ record of every signing event so auditors can review approvals without API acces
 - [ ] The Markdown record is uploaded as an artifact
       `record-of-approvals-<image_name>-<short_sha>.md` (365-day retention) and appended
       to `$GITHUB_STEP_SUMMARY`.
-- [ ] When `compliance_repo` input is set (e.g. `konecta-ix/kscp-audit-trail`), the job
+- [ ] When `compliance_repo` input is set (e.g. `konecta/kscp-audit-trail`), the job
       opens a PR to that repo committing the Markdown record under
       `records/<year>/<month>/<image_name>-<short_sha>.md`. PR creation is feature-gated
       by `enable_compliance_pr` (default `false`).
@@ -353,7 +353,7 @@ without breaking my pipelines, and I want a documented migration path I can adop
 ready.
 
 **Acceptance Criteria:**
-- [ ] No edits are made to `konecta-ix-applications/.github-private/.github/workflows/`
+- [ ] No edits are made to `the legacy docker-build-push workflows in /`
       during the initial KSCP release.
 - [ ] `docs/migration-from-legacy.md` documents the field-by-field mapping from
       `z_docker-build-push.yml` inputs to `scp.yml` inputs, including renamed flags
@@ -426,7 +426,7 @@ branch protection, etc.).
 - [ ] Workflow has `permissions: security-events: write, id-token: write,
       contents: read` to publish results to GitHub code scanning.
 - [ ] Workflow uploads SARIF results to GitHub code scanning and publishes a public
-      `https://api.securityscorecards.dev/projects/github.com/konecta-ix/kscp` badge.
+      `https://api.securityscorecards.dev/projects/github.com/konecta/kscp` badge.
 - [ ] `README.md` includes the Scorecard badge in its header.
 - [ ] The scorecard workflow targets a minimum score of 8.0 (out of 10); a drop below
       the threshold opens a tracking issue automatically via a follow-up step.
@@ -436,7 +436,7 @@ branch protection, etc.).
 ## 4. Functional Requirements
 
 - FR-1: KSCP MUST be implemented as a single `workflow_call` workflow at
-  `konecta-ix/kscp/.github/workflows/scp.yml`.
+  `konecta/kscp/.github/workflows/scp.yml`.
 - FR-2: KSCP MUST expose the following typed inputs, with defaults shown:
   - `image_name` (string, required)
   - `ar_registry` (string, required)
@@ -484,9 +484,10 @@ branch protection, etc.).
   `gitleaks_findings_count`, `vuln_attestation_digest`,
   `sbom_artifact_name`, `approvals_artifact_name`, `slsa_provenance_digest`,
   `version_created`.
-- FR-4: Every `uses:` referencing an action outside the `actions/` or `konecta-ix/`
-  namespaces MUST be pinned to a 40-character commit SHA with the version tag in a
-  trailing `# vX` comment. CI MUST reject PRs that fail this check.
+- FR-4: Every `uses:` referencing an action outside the `actions/`, `github/`, or
+  configurable `ALLOWED_ORG_NAMESPACES/` (default `konecta`) namespaces MUST be
+  pinned to a 40-character commit SHA with the version tag in a trailing `# vX`
+  comment. CI MUST reject PRs that fail this check.
 - FR-5: When `built_image` is non-empty, KSCP MUST skip the `container-build` job and the
   `scan-dockerfile` job, and operate on the supplied image URI for `security-scan`
   onwards.
@@ -631,7 +632,7 @@ branch protection, etc.).
   GitHub Actions token. KSCP must declare `permissions: deployments: read,
   actions: read` at the job level.
 - **Cosign verification identity**: `cosign verify` must use
-  `--certificate-identity-regexp "https://github.com/konecta-ix/kscp/.github/workflows/scp.yml@.*"`
+  `--certificate-identity-regexp "https://github.com/konecta/kscp/.github/workflows/scp.yml@.*"`
   and `--certificate-oidc-issuer https://token.actions.githubusercontent.com`.
 - **SLSA generator constraints**: the upstream
   `generator_container_slsa3.yml` reusable workflow runs in its own job and produces its

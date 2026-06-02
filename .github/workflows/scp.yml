@@ -1177,7 +1177,7 @@ jobs:
       contents: read
       packages: write
       actions: read
-    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@v2.0.0  # TODO: pin SHA at release time (pin-audit blocks unpinned uses outside konecta-ix/* + slsa-framework/* exemption)
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@v2.0.0  # TODO: pin SHA at release time (pin-audit allows tagged slsa-framework refs by exemption; all other non-allowlisted namespaces require a 40-char SHA)
     with:
       image: ${{ needs.publish.outputs.published_uri }}
       digest: ${{ needs.build-and-scan.outputs.image_digest }}

@@ -2,9 +2,14 @@ name: Pin audit
 
 # Verifies every third-party action used in scp.yml + other workflows is pinned
 # to a 40-character commit SHA (FR-4). Fails on any unpinned `uses:` outside
-# the actions/* and konecta-ix/* namespaces, with a documented exemption for
+# the always-allowed `actions/*` + `github/*` namespaces, plus any first-party
+# namespaces listed in the repository variable ALLOWED_ORG_NAMESPACES
+# (comma-separated, default: "konecta"). A documented exemption applies to
 # slsa-framework/slsa-github-generator/.github/workflows/*.yml (a reusable
 # workflow that GitHub resolves by ref-tag-then-SHA at runtime).
+#
+# To customise: set repo variable ALLOWED_ORG_NAMESPACES, e.g.
+#   konecta,konecta-ix,konecta-finance
 
 on:
   pull_request:
@@ -29,11 +34,22 @@ jobs:
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
       - name: Audit pins
+        env:
+          # Repo-level allowlist of first-party org namespaces exempt from
+          # SHA-pinning. Comma-separated; defaults to `konecta` when unset so
+          # any Konecta team can fork without configuration.
+          ALLOWED_ORG_NAMESPACES: ${{ vars.ALLOWED_ORG_NAMESPACES }}
         run: |
           set -euo pipefail
           fail=0
-          # Allow-list namespaces that don't need SHA pinning (first-party only).
-          allow_re='^(actions|konecta-ix|github)/'
+          # Always-allowed namespaces (GitHub-maintained tooling).
+          base_allow='actions|github'
+          # User-configurable namespaces from repo variable.
+          custom="${ALLOWED_ORG_NAMESPACES:-konecta}"
+          # Normalise: strip spaces, replace commas with '|'.
+          custom_alt="$(printf '%s' "$custom" | tr -d ' ' | tr ',' '|')"
+          allow_re="^(${base_allow}|${custom_alt})/"
+          echo "::notice::pin-audit allow-list: ${base_allow}, ${custom_alt} (plus slsa-framework tagged refs)"
           # Reusable workflows from the SLSA framework must be ref'd by tag for
           # GitHub's reusable-workflow resolver to honour the trusted-builder check.
           slsa_re='^slsa-framework/slsa-github-generator/'

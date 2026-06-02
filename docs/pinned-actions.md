@@ -2,8 +2,9 @@
 
 This is the source-of-truth table for every third-party action used by KSCP.
 The `pin-audit.yml` workflow rejects any PR that introduces an unpinned action
-outside the allow-listed namespaces (`actions/*`, `konecta-ix/*`, `github/*`,
-and the SLSA reusable-workflow exemption).
+outside the allow-listed namespaces (`actions/*`, `github/*`, the SLSA
+reusable-workflow exemption, and any first-party namespaces listed in repo
+variable `ALLOWED_ORG_NAMESPACES` — default `konecta`).
 
 When updating a pin, refresh both the SHA in the workflow file and the row
 below in the same PR. Reviewers should verify the SHA matches the release tag

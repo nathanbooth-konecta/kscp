@@ -32,11 +32,11 @@
 
 ---
 
-`konecta-ix/kscp` is a single reusable GitHub Actions workflow that supersedes
-the legacy `docker-build-push.yml`, `docker-build-push-python.yml`, and
-`image-promote.yml` files in `konecta-ix-applications/.github-private`. It
+`konecta/kscp` is a single reusable GitHub Actions workflow, designed for
+any team across Konecta, that supersedes per-repo `docker-build-push.yml`,
+`docker-build-push-python.yml`, and `image-promote.yml` patterns. It
 **always** builds, scans, signs, attests, and atomically publishes container
-images to `kd-ix-eur-shr-artifacts`; it **never** assumes outbound network
+images to your chosen Artifact Registry; it **never** assumes outbound network
 access, and **never** publishes an image that failed a configured gate without
 an explicit, audited `*_bypass: true` override.
 
@@ -108,7 +108,7 @@ them off without forking.
 ## Architecture
 
 KSCP is invoked as a reusable workflow from one of many caller repos. A
-single caller `uses: konecta-ix/kscp/.github/workflows/scp.yml@v1` pulls in
+single caller `uses: konecta/kscp/.github/workflows/scp.yml@v1` pulls in
 the full pipeline; the caller never installs tools or duplicates pin lines.
 
 ### Pipeline Stages
@@ -183,7 +183,7 @@ permissions:
 
 jobs:
   kscp:
-    uses: konecta-ix/kscp/.github/workflows/scp.yml@v1
+    uses: konecta/kscp/.github/workflows/scp.yml@v1
     with:
       image_name: kix-app-myservice
       ar_registry: europe-west1-docker.pkg.dev/kd-ix-eur-shr-artifacts/approved-images
@@ -226,7 +226,7 @@ Set every external integration to `false` in the caller:
 ```yaml
 jobs:
   kscp:
-    uses: konecta-ix/kscp/.github/workflows/scp.yml@v1
+    uses: konecta/kscp/.github/workflows/scp.yml@v1
     with:
       image_name: my-app
       ar_registry: localhost:5000
@@ -260,14 +260,15 @@ appears in the run's annotations and in `record-of-approvals.json`.
 | `allow_scan_bypass`            | Trivy (vuln, misconfig, license) | Upstream-only CVE pending vendor patch; **does not** bypass Trivy secret detection. |
 
 Defaults are all `false`. Setting any of these to `true` should be reviewed
-by `@konecta-ix/security-team` (CODEOWNERS-enforced).
+by `@konecta/security-team` (CODEOWNERS-enforced; each host org adjusts the
+team handle to match their structure).
 
 ## Testing
 
 | Layer | Files | Coverage |
 | --- | --- | --- |
 | Static lint | `.github/workflows/*.yml`, `examples/*.yml`, `scripts/*.sh`, `test/*.sh` | actionlint + yamllint + shellcheck |
-| Pin audit | `.github/workflows/pin-audit.yml` | Every `uses:` outside the `actions/*` / `konecta-ix/*` / SLSA-tag allow-list must be a 40-char SHA. |
+| Pin audit | `.github/workflows/pin-audit.yml` | Every `uses:` outside the `actions/*` / `github/*` / SLSA-tag allow-list, plus any namespaces listed in repo variable `ALLOWED_ORG_NAMESPACES` (default `konecta`), must be a 40-char SHA. |
 | Unit tests | `test/test-derive-tags.sh` | 17 assertions across 7 lane scenarios. |
 | Negative tests | `test/test-negative-cases.sh` + `test/fixtures/bad/` | Hadolint · Checkov · Gitleaks · Trivy vuln · Trivy secret. 15 assertions; verifies both detection and gate enforcement. |
 | Air-gapped | `.github/workflows/test-air-gapped.yml` | All-disabled run on every push. |
@@ -336,7 +337,8 @@ controls to its own source:
   results to GitHub code-scanning, and auto-opens an issue if the score drops
   below 8.0.
 - **CODEOWNERS gate.** All workflow and policy file changes require approval
-  from `@konecta-ix/platform-team` **and** `@konecta-ix/security-team`.
+  from `@konecta/platform-team` **and** `@konecta/security-team` (host orgs
+  remap to their own team handles).
 - **Negative-test suite.** `test/test-negative-cases.sh` proves the pipeline
   fails closed on real bad inputs — see the [Testing](#testing) section.
 - **Bypass is auditable, not silent.** Every bypass emits a GitHub annotation

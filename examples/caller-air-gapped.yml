@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   kscp:
-    uses: konecta-ix/kscp/.github/workflows/scp.yml@v1
+    uses: konecta/kscp/.github/workflows/scp.yml@v1
     with:
       image_name: kix-app-airgapped
       ar_registry: internal-registry.example/approved-images

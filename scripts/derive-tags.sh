@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # derive-tags.sh — emit the image tags KSCP should push for the current ref.
 #
-# Lane logic mirrors konecta-ix-applications/.github-private/.github/workflows/
-# docker-build-push.yml lines 259–343 byte-for-byte for the same inputs.
+# Lane logic mirrors the legacy private docker-build-push.yml workflow
+# (lines 259–343) byte-for-byte for the same inputs.
 #
 # Inputs (env):
 #   GITHUB_REF              required — e.g. refs/heads/main or refs/tags/v1.2.3

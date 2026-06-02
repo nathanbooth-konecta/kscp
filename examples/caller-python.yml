@@ -45,7 +45,7 @@ jobs:
 
   kscp:
     needs: python-ci
-    uses: konecta-ix/kscp/.github/workflows/scp.yml@v1
+    uses: konecta/kscp/.github/workflows/scp.yml@v1
     with:
       image_name: kix-app-pythonservice
       ar_registry: europe-west1-docker.pkg.dev/kd-ix-eur-shr-artifacts/approved-images
